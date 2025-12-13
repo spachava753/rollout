@@ -42,8 +42,8 @@ A task is a single instruction, container environment, and test script. Tasks ar
   build_timeout_sec = 600.0
   docker_image = "some-org/some-name:some-tag"
   cpus = "1"
-  memory_mb = "2048"
-  storage_mb = "10240"
+  memory = "2048"
+  storage = "10240"
   ```
 
   Configuration parameters:
@@ -92,17 +92,17 @@ A task is a single instruction, container environment, and test script. Tasks ar
     default: "1",
     path: "environment.cpus"
   },
-  "environment.memory_mb": {
+  "environment.memory": {
     description: "Amount of RAM available to the environment.",
     type: "string",
     default: "2G",
-    path: "environment.memory_mb"
+    path: "environment.memory"
   },
-  "environment.storage_mb": {
+  "environment.storage": {
     description: "Amount of storage available to the environment.",
     type: "string",
     default: "10G",
-    path: "environment.storage_mb"
+    path: "environment.storage"
   },
   "source": {
     description: "Optional source string for task provenance.",
@@ -112,7 +112,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
   }
   ```
 
-  The `environment.(cpus|memory_mb|storage_mb)` values are interpreted as a [quantity](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/) expression, similar to quantities specified in Kubernetes.
+  The `environment.(cpus|memory|storage)` values are interpreted as a [quantity](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/) expression, similar to quantities specified in Kubernetes.
 
 - **environment/**: The environment definition is placed in an `environment/` folder. **Rollout does not require any specific file to exist in that directory**. Which file is required depends on the environment type being used for the evaluation. For example, to use docker, we check that an `environment/Dockerfile` or `environment/docker-compose.yaml` is present. Different environment types could require other files to be present (e.g. an Apptainer environment could check for an `image.def` file). Most cloud sandbox providers only support `Dockerfile` defined environments and not docker compose.
 
@@ -475,8 +475,8 @@ environment:
   force_build: false # force a rebuild of an environment
   delete: true # default true, clean up the environment upon completion of task, such as removing images, snapshots, etc.
   override_cpus: 1 # if set, override task specific cpu config
-  override_memory_mb: 2G # if set, override task specific memory config
-  override_storage_mb: 30G # if set, override task specific storage config
+  override_memory: 2G # if set, override task specific memory config
+  override_storage: 30G # if set, override task specific storage config
 verifier:
   override_timeout_sec: 0 # if set, override task specific verifier timeout
   max_timeout_sec: 0 # if set, sets the ceiling of timeouts for verifiers
