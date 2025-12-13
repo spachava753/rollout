@@ -36,6 +36,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
   timeout_sec = 120.0
 
   [agent]
+  install_timeout_sec = 300.0
   timeout_sec = 120.0
 
   [environment]
@@ -68,8 +69,14 @@ A task is a single instruction, container environment, and test script. Tasks ar
     default: 600.0,
     path: "verifier.timeout_sec"
   },
+  "agent.install_timeout_sec": {
+    description: "Timeout in seconds for agent installation.",
+    type: "number",
+    default: 300.0,
+    path: "agent.install_timeout_sec"
+  },
   "agent.timeout_sec": {
-    description: "Timeout in seconds for the agent.",
+    description: "Timeout in seconds for agent execution.",
     type: "number",
     default: 600.0,
     path: "agent.timeout_sec"
@@ -127,6 +134,8 @@ A task is a single instruction, container environment, and test script. Tasks ar
 
   The `/logs/` directory is downloaded to the host after the agent/verifier run and are often useful for debugging and analysis.
 
+  **Working Directory:** The working directory for agent and verifier execution is determined by the task's `environment/Dockerfile`. If not explicitly set via `WORKDIR`, it inherits from the base image. Task authors should set `WORKDIR` explicitly to avoid ambiguity.
+
 - **solution/**: The solution folder must contain a `solution/solve.sh` script. Other dependencies are allowed. This folder is copied to `/oracle` by the Oracle agent at runtime and executed from the working directory. If no solution is provided, the Oracle agent cannot be used to sanity check the task.
 - **tests/**: The tests folder must contain a `tests/test.sh` script. The test script should install test dependencies and verify the agent completed the instruction. The test may be anything, from executing `pytest` to using LLM as a judge to verify task completion.
 
@@ -136,11 +145,9 @@ A task is a single instruction, container environment, and test script. Tasks ar
 
   Importantly, the test script must produce a reward file in the `/logs/verifier/` directory. This is the file that the verifier will read to determine if the task was successful.
 
-  There are two ways to produce a reward file:
-
-  | Reward File                 | Format                | Description                                                                                                 |
-  | --------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
-  | `/logs/verifier/reward.txt` | Plain text (e.g. `1`) | A plain text file containing a single integer or float value, typically `1` for success or `0` for failure. |
+  | Reward File                 | Format                            | Description                                                                                                 |
+  | --------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+  | `/logs/verifier/reward.txt` | Plain text (e.g. `1`, `0`, `0.5`) | A plain text file containing a single integer or float value, typically `1` for success or `0` for failure. |
 
   Your test script must output `reward.txt`.
 
@@ -445,7 +452,7 @@ Environments in Rollout are containers, typically defined as Docker images using
 2. **Start environment:** Start container with built image in platform (create sandbox via API calls with image, or deploy to Kubernetes as a Pod, with sleep comand) and keep it running. Copy the task's `instruction.md` to the configured path (default: `/tmp/instruction.md`) and set the `$ROLLOUT_TASK_INSTRUCTION` environment variable to this path.
 3. **Install agent:** Copy the agent install script into the container and execute.
 4. **Execute agent:** Copy the agent execute script into the container and execute.
-5. **Verify:** Copy the tasks `tests/` folder into the container at `/tests` and execute `/tests/tests.sh`
+5. **Verify:** Copy the tasks `tests/` folder into the container at `/tests` and execute `/tests/test.sh`
 6. **Create trial output:** Collect all outputs before stopping the container:
    - Copy the container's `/logs` directory to `<trial>/logs/` on the host
    - Write captured stdout/stderr from agent install to `<trial>/setup/`
@@ -464,7 +471,7 @@ A trial is an agent's attempt at completing a task. A trial is spawned from a jo
 
 - **Reward:** The score produced by the verifier (from `/logs/verifier/reward.txt`)
 - **Timing:** Durations and timestamps for each phase (environment setup, agent setup, agent execution, verification)
-- **Cost:** Resource costs incurred during the trial
+- **Cost:** Resource costs incurred during the trial. Cost is provider-specific and calculated based on the environment type selected (e.g., Modal pricing for Modal environments, compute costs for Kubernetes, etc.)
 - **Error:** Any errors that occurred during execution
 
 Trial results are stored in `<trial>/result.json`. See [Job Output](#job-output) for the full schema and directory structure.
@@ -490,7 +497,7 @@ The following error types are defined:
 | `environment_start_failed`               | Environment Start | Container failed to start after image was built/pulled                                      |
 | `environment_resource_allocation_failed` | Environment Start | Platform could not allocate requested CPU/memory/storage                                    |
 | `agent_install_failed`                   | Agent Install     | Agent install script returned non-zero exit code                                            |
-| `agent_install_timeout`                  | Agent Install     | Agent install script exceeded timeout                                                       |
+| `agent_install_timeout`                  | Agent Install     | Agent install script exceeded `agent.install_timeout_sec`                                   |
 | `agent_execution_failed`                 | Agent Execution   | Agent execute script returned non-zero exit code                                            |
 | `agent_execution_timeout`                | Agent Execution   | Agent execution exceeded `agent.timeout_sec`                                                |
 | `verifier_failed`                        | Verification      | Test script returned non-zero exit code                                                     |
@@ -561,30 +568,31 @@ datasets:
 
 Running a job produces a structured output directory containing all trial results, logs, and metadata. The output is organized as follows:
 
-| Path                                                                     | Description                                                                                                            |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `jobs/`                                                                  | The jobs folder, as specified by `jobs_dir` in `job.yaml`                                                              |
-| `jobs/<job-name>/`                                                       | Directory for the job execution. If `name` is not provided in `job.yaml`, defaults to `YYYY-MM-DD__HH-mm-ss` timestamp |
-| `jobs/<job-name>/config.json`                                            | Copy of `job.yaml` in JSON format                                                                                      |
-| `jobs/<job-name>/result.json`                                            | Aggregate results of job execution                                                                                     |
-| `jobs/<job-name>/<agent-name>/`                                          | Results grouped by agent                                                                                               |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/`                         | Trial-specific directory. `<task-name>` is the task folder name, `<n>` is the attempt number                           |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/result.json`              | Trial result                                                                                                           |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/error.txt`                | Error details if environment build/destroy or other fatal errors occurred                                              |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/setup/`                   | Rollout-captured logs from agent installation                                                                          |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/setup/stderr.txt`         | Stderr from agent installation                                                                                         |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/setup/stdout.txt`         | Stdout from agent installation                                                                                         |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/command/`                 | Rollout-captured logs from agent execution                                                                             |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/command/stderr.txt`       | Stderr from agent execution                                                                                            |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/command/stdout.txt`       | Stdout from agent execution                                                                                            |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/`                    | Copied from the container's `/logs` directory                                                                          |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/agent/`              | Agent-produced logs (from `/logs/agent/` in container)                                                                 |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/`           | Verifier logs and results (from `/logs/verifier/` in container)                                                        |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/reward.txt` | Reward file produced by tests                                                                                          |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/stderr.txt` | Stderr from test execution                                                                                             |
-| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/stdout.txt` | Stdout from test execution                                                                                             |
+| Path                                                                                    | Description                                                                                                            |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `jobs/`                                                                                 | The jobs folder, as specified by `jobs_dir` in `job.yaml`                                                              |
+| `jobs/<job-name>/`                                                                      | Directory for the job execution. If `name` is not provided in `job.yaml`, defaults to `YYYY-MM-DD__HH-mm-ss` timestamp |
+| `jobs/<job-name>/config.json`                                                           | Copy of `job.yaml` in JSON format                                                                                      |
+| `jobs/<job-name>/result.json`                                                           | Aggregate results of job execution                                                                                     |
+| `jobs/<job-name>/<agent-name>/`                                                         | Results grouped by agent                                                                                               |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/`                                          | Results grouped by dataset within agent                                                                                |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/`                         | Trial-specific directory. `<task-name>` is the task folder name, `<n>` is the attempt number                           |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/result.json`              | Trial result                                                                                                           |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/error.txt`                | Error details if environment build/destroy or other fatal errors occurred                                              |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/setup/`                   | Rollout-captured logs from agent installation                                                                          |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/setup/stderr.txt`         | Stderr from agent installation                                                                                         |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/setup/stdout.txt`         | Stdout from agent installation                                                                                         |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/command/`                 | Rollout-captured logs from agent execution                                                                             |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/command/stderr.txt`       | Stderr from agent execution                                                                                            |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/command/stdout.txt`       | Stdout from agent execution                                                                                            |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/`                    | Copied from the container's `/logs` directory                                                                          |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/agent/`              | Agent-produced logs (from `/logs/agent/` in container)                                                                 |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/`           | Verifier logs and results (from `/logs/verifier/` in container)                                                        |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/reward.txt` | Reward file produced by tests                                                                                          |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/stderr.txt` | Stderr from test execution                                                                                             |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/stdout.txt` | Stdout from test execution                                                                                             |
 
-**Note:** Since a job may contain multiple datasets, it is possible for different datasets to contain tasks with the same name. If duplicate task names are detected across datasets, Rollout will throw an error.
+**Note:** Since a job may contain multiple datasets, it is possible for different datasets to contain tasks with the same name. To handle this, trial results are namespaced under the dataset name, allowing the same task name to exist in different datasets without conflict.
 
 #### Trial `result.json`
 
@@ -593,6 +601,7 @@ The trial-level `result.json` contains timing, cost, reward, and error informati
 ```json
 {
   "task_name": "hello-world",
+  "dataset_name": "terminal-bench",
   "agent_name": "cpe",
   "attempt": 1,
   "reward": 1.0,
@@ -625,6 +634,7 @@ The `error` field, when present, describes the failure type (see [Error Types](#
 ```json
 {
   "task_name": "complex-task",
+  "dataset_name": "terminal-bench",
   "agent_name": "cpe",
   "attempt": 1,
   "reward": null,
@@ -692,24 +702,28 @@ The job-level `result.json` contains aggregate metrics across all trials:
   "results": [
     {
       "task_name": "hello-world",
+      "dataset_name": "terminal-bench",
       "agent_name": "cpe",
       "attempt": 1,
       "reward": 1.0
     },
     {
       "task_name": "hello-world",
+      "dataset_name": "terminal-bench",
       "agent_name": "oracle",
       "attempt": 1,
       "reward": 1.0
     },
     {
       "task_name": "complex-task",
+      "dataset_name": "terminal-bench",
       "agent_name": "cpe",
       "attempt": 1,
       "reward": 0.0
     },
     {
       "task_name": "complex-task",
+      "dataset_name": "terminal-bench",
       "agent_name": "oracle",
       "attempt": 1,
       "reward": 1.0
