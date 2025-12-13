@@ -304,7 +304,7 @@ agents:
 # ... other parts of job.yaml
 ```
 
-When executing the agent, the environment variable `$ROLLOUT_TASK_INSTRUCTION` is set, which contains the contents of `instruction.md` of the task.
+When executing the agent, the environment variable `$ROLLOUT_TASK_INSTRUCTION` is set to the path where `instruction.md` has been copied in the container (default: `/tmp/instruction.md`). This path is configurable via `instruction_path` in `job.yaml`.
 
 Here is an example agents definition for installing CPE.
 
@@ -442,7 +442,7 @@ In addition, there exists a special `oracle` agent, in which the `solution/` fol
 Environments in Rollout are containers, typically defined as Docker images using a `Dockerfile` in a task `environment/` folder, as well as any artifacts that are used in the process of building the image to execute, such as dependencies or zip file artifacts that should be copied to the `Dockerfile`. The execution of the task in the container follows flow:
 
 1. **Image building:** Build the image using the `environment/Dockerfile`. Some platforms like Modal and Fly can build on their platform, where as the if the `environment.type` in `job.yaml` is docker, the image is built locally.
-2. **Start environment:** Start container with built image in platform (create sandbox via API calls with image, or deploy to Kubernetes as a Pod, with sleep comand) and keep it running. When starting, inject the `$ROLLOUT_TASK_INSTRUCTION` environment variable, which contains the task instruction.
+2. **Start environment:** Start container with built image in platform (create sandbox via API calls with image, or deploy to Kubernetes as a Pod, with sleep comand) and keep it running. Copy the task's `instruction.md` to the configured path (default: `/tmp/instruction.md`) and set the `$ROLLOUT_TASK_INSTRUCTION` environment variable to this path.
 3. **Install agent:** Copy the agent install script into the container and execute.
 4. **Execute agent:** Copy the agent execute script into the container and execute.
 5. **Verify:** Copy the tasks `tests/` folder into the container at `/tests` and execute `/tests/tests.sh`
@@ -482,6 +482,7 @@ n_attempts: 1 # number of attempts
 n_concurrent_trials: 4 # number of concurrent trials
 timeout_multiplier: 1.0 # allows you to globally scale the timeout durations for various operations within a job. Useful if running older hardware, and need to increase timeouts specified for a task, agent execution, or verifier execution
 log_level: error # log level for rollout
+instruction_path: /tmp/instruction.md # path where instruction.md is copied in the container; $ROLLOUT_TASK_INSTRUCTION will contain this path
 environment:
   type: "docker" # or k8s, or modal, etc.
   force_build: false # force a rebuild of an environment
