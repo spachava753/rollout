@@ -143,7 +143,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
 
   **We recommend using absolute paths in your test script to avoid relative path issues.**
 
-  Importantly, the test script must produce a reward file in the `/logs/verifier/` directory. This is the file that the verifier will read to determine if the task was successful.
+  Importantly, the test script must produce a reward file in the `/logs/verifier/` directory **and exit with code 0**. This is the file that the verifier will read to determine if the task was successful. If the script exits with a non-zero code, the trial is marked as failed regardless of whether a reward file was produced.
 
   | Reward File                 | Format                            | Description                                                                                                 |
   | --------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -448,7 +448,7 @@ In addition, there exists a special `oracle` agent, in which the `solution/` fol
 
 Environments in Rollout are containers, typically defined as Docker images using a `Dockerfile` in a task `environment/` folder, as well as any artifacts that are used in the process of building the image to execute, such as dependencies or zip file artifacts that should be copied to the `Dockerfile`. The execution of the task in the container follows flow:
 
-1. **Image building:** Build the image using the `environment/Dockerfile`. Some platforms like Modal and Fly can build on their platform, where as the if the `environment.type` in `job.yaml` is docker, the image is built locally.
+1. **Image building:** Build the image using the `environment/Dockerfile`. Some platforms like Modal and Fly can build on their platform, where as the if the `environment.type` in `job.yaml` is docker, the image is built locally. **Built images are cached by default** for the Docker environment type; for cloud sandbox providers, caching depends on provider support and our implementation. The `force_build` option in `job.yaml` forces a rebuild, bypassing the cache.
 2. **Start environment:** Start container with built image in platform (create sandbox via API calls with image, or deploy to Kubernetes as a Pod, with sleep comand) and keep it running. Copy the task's `instruction.md` to the configured path (default: `/tmp/instruction.md`) and set the `$ROLLOUT_TASK_INSTRUCTION` environment variable to this path.
 3. **Install agent:** Copy the agent install script into the container and execute.
 4. **Execute agent:** Copy the agent execute script into the container and execute.
@@ -469,8 +469,12 @@ We aim to support many cloud providers and platforms out of the box, including F
 
 A trial is an agent's attempt at completing a task. A trial is spawned from a job definition (not explicitly defined by the user) and produces a structured output including:
 
+**Trial enumeration:** Trials are generated as the Cartesian product of (agent, task, attempt) with deterministic ordering. For a job with `n_attempts` attempts, multiple agents, and multiple datasets containing tasks, Rollout iterates in order: for each agent, for each dataset, for each task in the dataset, for each attempt (1 to n_attempts).
+
+Trial outputs include:
+
 - **Reward:** The score produced by the verifier (from `/logs/verifier/reward.txt`)
-- **Timing:** Durations and timestamps for each phase (environment setup, agent setup, agent execution, verification)
+- **Timing:** Durations and timestamps for each phase (environment setup, agent setup, agent execution, verification). Note that "environment setup" encompasses image build/pull, container start, and file copy operations.
 - **Cost:** Resource costs incurred during the trial. Cost is provider-specific and calculated based on the environment type selected (e.g., Modal pricing for Modal environments, compute costs for Kubernetes, etc.)
 - **Error:** Any errors that occurred during execution
 
@@ -514,6 +518,7 @@ The following error types are defined:
 - If an error occurs during environment build/start, the trial is marked as failed and no further phases execute.
 - If an error occurs during agent install/execution, the verifier is skipped and Rollout proceeds directly to teardown.
 - If the verifier fails or times out, the `reward` field is set to `null`.
+- **If the verifier script exits with a non-zero exit code, it is always treated as an error (`verifier_failed`), even if a `reward.txt` file was produced.** The reward file is ignored in this case.
 - Environment teardown errors are recorded but do not affect the trial's reward.
 - For `task_invalid` and `task_not_found` errors, no container is started.
 
@@ -526,14 +531,14 @@ The structure of job looks like this:
 ```yaml
 name: my-eval-run # Optional. If not provided, defaults to YYYY-MM-DD__HH-mm-ss timestamp. Used as the output directory name.
 jobs_dir: jobs # the output directory to store trial results
-n_attempts: 1 # number of attempts
+n_attempts: 1 # number of attempts per (agent, task) pair
 n_concurrent_trials: 4 # number of concurrent trials
 timeout_multiplier: 1.0 # allows you to globally scale the timeout durations for various operations within a job. Useful if running older hardware, and need to increase timeouts specified for a task, agent execution, or verifier execution
 log_level: error # log level for rollout
 instruction_path: /tmp/instruction.md # path where instruction.md is copied in the container; $ROLLOUT_TASK_INSTRUCTION will contain this path
 environment:
   type: "docker" # or k8s, or modal, etc.
-  force_build: false # force a rebuild of an environment
+  force_build: false # if true, bypass image cache and force a rebuild
   delete: true # default true, clean up the environment upon completion of task, such as removing images, snapshots, etc.
   override_cpus: 1 # if set, override task specific cpu config
   override_memory: 2G # if set, override task specific memory config
