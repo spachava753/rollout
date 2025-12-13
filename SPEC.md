@@ -114,7 +114,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
 
   The `environment.(cpus|memory|storage)` values are interpreted as a [quantity](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/) expression, similar to quantities specified in Kubernetes.
 
-- **environment/**: The environment definition is placed in an `environment/` folder. **Rollout does not require any specific file to exist in that directory**. Which file is required depends on the environment type being used for the evaluation. For example, to use docker, we check that an `environment/Dockerfile` or `environment/docker-compose.yaml` is present. Different environment types could require other files to be present (e.g. an Apptainer environment could check for an `image.def` file). Most cloud sandbox providers only support `Dockerfile` defined environments and not docker compose.
+- **environment/**: The environment definition is placed in an `environment/` folder. **Rollout does not require any specific file to exist in that directory**. Which file is required depends on the environment type being used for the evaluation. For example, to use docker, we check that an `environment/Dockerfile` is present. Different environment types could require other files to be present (e.g. an Apptainer environment could check for an `image.def` file). Most cloud sandbox providers only support `Dockerfile` defined environments and not docker compose.
 
   There are a few special paths in the environment's filesystem:
 
