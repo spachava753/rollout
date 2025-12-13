@@ -88,7 +88,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
     path: "environment.build_timeout_sec"
   },
   "environment.docker_image": {
-    description: "A pre-built Docker image to use for the environment.",
+    description: "A pre-built Docker image to use for the environment. When set, this image is used instead of building from environment/Dockerfile. If the image is not present locally, Rollout pulls it from the registry before starting the container.",
     type: 'string | null',
     default: null,
     path: "environment.docker_image"
@@ -119,7 +119,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
   }
   ```
 
-  The `environment.(cpus|memory|storage)` values are interpreted as a [quantity](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/) expression, similar to quantities specified in Kubernetes.
+  The `environment.(cpus|memory|storage)` values are interpreted as a [quantity](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/) expression, similar to quantities specified in Kubernetes. Rollout translates these values to the appropriate configuration format expected by each environment provider (e.g., Docker resource constraints, Kubernetes resource requests/limits, Modal sandbox specs).
 
 - **environment/**: The environment definition is placed in an `environment/` folder. **Rollout does not require any specific file to exist in that directory**. Which file is required depends on the environment type being used for the evaluation. For example, to use docker, we check that an `environment/Dockerfile` is present. Different environment types could require other files to be present (e.g. an Apptainer environment could check for an `image.def` file). Most cloud sandbox providers only support `Dockerfile` defined environments and not docker compose.
 
@@ -442,7 +442,7 @@ agents:
 
 Note that when defining a [job](###Job), you may provide environment variables that are set before running the installation and execution script. This is especially helpful if you need certain inputs to execute the agent based on the job definition, such as a model id, or generation parameters.
 
-In addition, there exists a special `oracle` agent, in which the `solution/` folder is copied to the `/oracle` path, and executed from the working directory.
+In addition, `oracle` is a reserved agent name with special behavior. When an agent named `oracle` is specified, Rollout copies the task's `solution/` folder to `/oracle` in the container and executes `bash /oracle/solve.sh` from the working directory. No `install` or `execute` scripts are needed for the oracle agent—specifying `- name: oracle` in the agents list is sufficient.
 
 ### Container environment
 
@@ -451,7 +451,7 @@ Environments in Rollout are containers, typically defined as Docker images using
 1. **Image building:** Build the image using the `environment/Dockerfile`. Some platforms like Modal and Fly can build on their platform, where as the if the `environment.type` in `job.yaml` is docker, the image is built locally. **Built images are cached by default** for the Docker environment type; for cloud sandbox providers, caching depends on provider support and our implementation. The `force_build` option in `job.yaml` forces a rebuild, bypassing the cache.
 2. **Start environment:** Start container with built image in platform (create sandbox via API calls with image, or deploy to Kubernetes as a Pod, with sleep comand) and keep it running. Copy the task's `instruction.md` to the configured path (default: `/tmp/instruction.md`) and set the `$ROLLOUT_TASK_INSTRUCTION` environment variable to this path.
 3. **Install agent:** Copy the agent install script into the container and execute.
-4. **Execute agent:** Copy the agent execute script into the container and execute.
+4. **Execute agent:** Copy the agent execute script into the container and execute. Task completion occurs when the execute script finishes running, regardless of exit code (success or failure).
 5. **Verify:** Copy the tasks `tests/` folder into the container at `/tests` and execute `/tests/test.sh`
 6. **Create trial output:** Collect all outputs before stopping the container:
    - Copy the container's `/logs` directory to `<trial>/logs/` on the host
@@ -533,7 +533,7 @@ name: my-eval-run # Optional. If not provided, defaults to YYYY-MM-DD__HH-mm-ss 
 jobs_dir: jobs # the output directory to store trial results
 n_attempts: 1 # number of attempts per (agent, task) pair
 n_concurrent_trials: 4 # number of concurrent trials
-timeout_multiplier: 1.0 # allows you to globally scale the timeout durations for various operations within a job. Useful if running older hardware, and need to increase timeouts specified for a task, agent execution, or verifier execution
+timeout_multiplier: 1.0 # multiplier applied to ALL configurable timeouts: task-level timeouts (agent.timeout_sec, agent.install_timeout_sec, verifier.timeout_sec, environment.build_timeout_sec), job-level override timeouts (verifier.override_timeout_sec, verifier.max_timeout_sec), and any other timeout settings. Useful when running on slower hardware
 log_level: error # log level for rollout
 instruction_path: /tmp/instruction.md # path where instruction.md is copied in the container; $ROLLOUT_TASK_INSTRUCTION will contain this path
 environment:
@@ -741,7 +741,7 @@ The job-level `result.json` contains aggregate metrics across all trials:
 
 - `completed_trials`: Trials where the verifier ran and produced a reward (regardless of reward value)
 - `failed_trials`: Trials where an error prevented the verifier from producing a reward (any error type except `environment_teardown_failed`)
-- `pass_rate`: Proportion of completed trials with reward ≥ 1.0
+- `pass_rate`: Proportion of completed trials with reward 1.0
 - `mean_reward`: Average reward across completed trials only (failed trials excluded)
 
 ## Usage
