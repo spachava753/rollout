@@ -446,15 +446,28 @@ Environments in Rollout are containers, typically defined as Docker images using
 3. **Install agent:** Copy the agent install script into the container and execute.
 4. **Execute agent:** Copy the agent execute script into the container and execute.
 5. **Verify:** Copy the tasks `tests/` folder into the container at `/tests` and execute `/tests/tests.sh`
-6. **Create trial output:** Copy `/logs` folder to host. We copy this folder before stopping the container, as we may not have access to the file system after the container is stopped.
+6. **Create trial output:** Collect all outputs before stopping the container:
+   - Copy the container's `/logs` directory to `<trial>/logs/` on the host
+   - Write captured stdout/stderr from agent install to `<trial>/setup/`
+   - Write captured stdout/stderr from agent execute to `<trial>/command/`
+   - Generate `<trial>/result.json` with timing, cost, reward, and error information
 7. **Stop environment:** Stop the execution of the running container.
-8. **Clean up (optional):** if delete is set to true (this is default), clean up resources like built images, pod in kubernetes, etc.
+8. **Clean up (optional):** If delete is set to true (this is default), clean up resources like built images, pod in kubernetes, etc.
+
+**Error handling:** If the environment fails to build or encounters a fatal error during setup/teardown, the error details are written to `<trial>/error.txt` and the `error` field is populated in `result.json`.
 
 We aim to support many cloud providers and platforms out of the box, including Fly, Modal, and Kubernetes.
 
 ### Trial
 
-A trial is an agent's attempt at completing a task. Essentially, a trial is a rollout that produces a reward. As such, a trial should contain info about the task, agent, the execution platform (Kubernetes, Modal, etc.) and a reward. A trial is explicitly defined by a user of Rollout, rather it is spawned from a job definition.
+A trial is an agent's attempt at completing a task. A trial is spawned from a job definition (not explicitly defined by the user) and produces a structured output including:
+
+- **Reward:** The score produced by the verifier (from `/logs/verifier/reward.txt`)
+- **Timing:** Durations and timestamps for each phase (environment setup, agent setup, agent execution, verification)
+- **Cost:** Resource costs incurred during the trial
+- **Error:** Any errors that occurred during execution
+
+Trial results are stored in `<trial>/result.json`. See [Job Output](#job-output) for the full schema and directory structure.
 
 ### Job
 
@@ -463,7 +476,7 @@ A job is a collection of trials. Jobs are used to evaluate agents across dataset
 The structure of job looks like this:
 
 ```yaml
-name: Job name
+name: my-eval-run # Optional. If not provided, defaults to YYYY-MM-DD__HH-mm-ss timestamp. Used as the output directory name.
 jobs_dir: jobs # the output directory to store trial results
 n_attempts: 1 # number of attempts
 n_concurrent_trials: 4 # number of concurrent trials
@@ -500,6 +513,147 @@ datasets:
       url: https://raw.githubusercontent.com/laude-institute/harbor/refs/heads/main/registry.json # url to a registry defining datasets
     name: "dataset-name" # name of dataset as found in registry
     version: "dataset-version" # version of dataset as found in registry
+```
+
+### Job Output
+
+Running a job produces a structured output directory containing all trial results, logs, and metadata. The output is organized as follows:
+
+| Path | Description |
+| ---- | ----------- |
+| `jobs/` | The jobs folder, as specified by `jobs_dir` in `job.yaml` |
+| `jobs/<job-name>/` | Directory for the job execution. If `name` is not provided in `job.yaml`, defaults to `YYYY-MM-DD__HH-mm-ss` timestamp |
+| `jobs/<job-name>/config.json` | Copy of `job.yaml` in JSON format |
+| `jobs/<job-name>/result.json` | Aggregate results of job execution |
+| `jobs/<job-name>/<agent-name>/` | Results grouped by agent |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/` | Trial-specific directory. `<task-name>` is the task folder name, `<n>` is the attempt number |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/result.json` | Trial result |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/error.txt` | Error details if environment build/destroy or other fatal errors occurred |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/setup/` | Rollout-captured logs from agent installation |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/setup/stderr.txt` | Stderr from agent installation |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/setup/stdout.txt` | Stdout from agent installation |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/command/` | Rollout-captured logs from agent execution |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/command/stderr.txt` | Stderr from agent execution |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/command/stdout.txt` | Stdout from agent execution |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/` | Copied from the container's `/logs` directory |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/agent/` | Agent-produced logs (from `/logs/agent/` in container) |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/` | Verifier logs and results (from `/logs/verifier/` in container) |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/reward.txt` | Reward file produced by tests |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/stderr.txt` | Stderr from test execution |
+| `jobs/<job-name>/<agent-name>/<task-name>__<n>/logs/verifier/stdout.txt` | Stdout from test execution |
+
+**Note:** Since a job may contain multiple datasets, it is possible for different datasets to contain tasks with the same name. If duplicate task names are detected across datasets, Rollout will throw an error.
+
+#### Trial `result.json`
+
+The trial-level `result.json` contains timing, cost, reward, and error information for a single trial:
+
+```json
+{
+  "task_name": "hello-world",
+  "agent_name": "cpe",
+  "attempt": 1,
+  "reward": 1.0,
+  "cost": 0.0342,
+  "error": null,
+  "durations": {
+    "total_sec": 245.3,
+    "environment_setup_sec": 120.5,
+    "agent_setup_sec": 45.2,
+    "agent_execution_sec": 65.1,
+    "verifier_sec": 14.5
+  },
+  "timestamps": {
+    "started_at": "2025-01-15T10:30:00Z",
+    "environment_setup_started_at": "2025-01-15T10:30:00Z",
+    "environment_setup_ended_at": "2025-01-15T10:32:00Z",
+    "agent_setup_started_at": "2025-01-15T10:32:00Z",
+    "agent_setup_ended_at": "2025-01-15T10:32:45Z",
+    "agent_execution_started_at": "2025-01-15T10:32:45Z",
+    "agent_execution_ended_at": "2025-01-15T10:33:50Z",
+    "verifier_started_at": "2025-01-15T10:33:50Z",
+    "verifier_ended_at": "2025-01-15T10:34:05Z",
+    "ended_at": "2025-01-15T10:34:05Z"
+  }
+}
+```
+
+The `error` field, when present, describes the failure type:
+
+```json
+{
+  "task_name": "complex-task",
+  "agent_name": "cpe",
+  "attempt": 1,
+  "reward": null,
+  "cost": 0.012,
+  "error": {
+    "type": "agent_execution_timeout",
+    "message": "Agent execution exceeded timeout of 600 seconds"
+  },
+  "durations": {
+    "total_sec": 720.0,
+    "environment_setup_sec": 115.2,
+    "agent_setup_sec": 4.8,
+    "agent_execution_sec": 600.0,
+    "verifier_sec": null
+  },
+  "timestamps": {
+    "started_at": "2025-01-15T11:00:00Z",
+    "environment_setup_started_at": "2025-01-15T11:00:00Z",
+    "environment_setup_ended_at": "2025-01-15T11:01:55Z",
+    "agent_setup_started_at": "2025-01-15T11:01:55Z",
+    "agent_setup_ended_at": "2025-01-15T11:02:00Z",
+    "agent_execution_started_at": "2025-01-15T11:02:00Z",
+    "agent_execution_ended_at": "2025-01-15T11:12:00Z",
+    "verifier_started_at": null,
+    "verifier_ended_at": null,
+    "ended_at": "2025-01-15T11:12:00Z"
+  }
+}
+```
+
+#### Job `result.json`
+
+The job-level `result.json` contains aggregate metrics across all trials:
+
+```json
+{
+  "job_name": "my-eval-run",
+  "total_trials": 20,
+  "completed_trials": 18,
+  "failed_trials": 2,
+  "pass_rate": 0.85,
+  "mean_reward": 0.85,
+  "total_cost": 1.234,
+  "total_duration_sec": 3600.5,
+  "started_at": "2025-01-15T10:00:00Z",
+  "ended_at": "2025-01-15T11:00:00Z",
+  "agents": {
+    "cpe": {
+      "total_trials": 10,
+      "completed_trials": 9,
+      "failed_trials": 1,
+      "pass_rate": 0.9,
+      "mean_reward": 0.9,
+      "total_cost": 0.617
+    },
+    "oracle": {
+      "total_trials": 10,
+      "completed_trials": 9,
+      "failed_trials": 1,
+      "pass_rate": 0.8,
+      "mean_reward": 0.8,
+      "total_cost": 0.617
+    }
+  },
+  "results": [
+    {"task_name": "hello-world", "agent_name": "cpe", "attempt": 1, "reward": 1.0},
+    {"task_name": "hello-world", "agent_name": "oracle", "attempt": 1, "reward": 1.0},
+    {"task_name": "complex-task", "agent_name": "cpe", "attempt": 1, "reward": 0.0},
+    {"task_name": "complex-task", "agent_name": "oracle", "attempt": 1, "reward": 1.0}
+  ]
+}
 ```
 
 ## Usage
