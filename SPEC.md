@@ -448,7 +448,7 @@ In addition, `oracle` is a reserved agent name with special behavior. When an ag
 
 Environments in Rollout are containers, typically defined as Docker images using a `Dockerfile` in a task `environment/` folder, as well as any artifacts that are used in the process of building the image to execute, such as dependencies or zip file artifacts that should be copied to the `Dockerfile`. The execution of the task in the container follows flow:
 
-1. **Image building:** Build the image using the `environment/Dockerfile`. Some platforms like Modal and Fly can build on their platform, where as the if the `environment.type` in `job.yaml` is docker, the image is built locally. **Built images are cached by default** for the Docker environment type; for cloud sandbox providers, caching depends on provider support and our implementation. The `force_build` option in `job.yaml` forces a rebuild, bypassing the cache.
+1. **Image building:** Build the image using the `environment/Dockerfile`. Some platforms like Modal and Fly can build on their platform, where as if the `environment.type` in `job.yaml` is docker, the image is built locally. **Built images are cached by default** for the Docker environment type; for cloud sandbox providers, caching depends on provider support and our implementation. The `force_build` option in `job.yaml` forces a rebuild, bypassing the cache. When `force_build` is set, Rollout builds from the task's `environment/Dockerfile` even if `environment.docker_image` is specified in `task.toml`.
 2. **Start environment:** Start container with built image in platform (create sandbox via API calls with image, or deploy to Kubernetes as a Pod, with sleep comand) and keep it running. Copy the task's `instruction.md` to the configured path (default: `/tmp/instruction.md`) and set the `$ROLLOUT_TASK_INSTRUCTION` environment variable to this path.
 3. **Install agent:** Copy the agent install script into the container and execute.
 4. **Execute agent:** Copy the agent execute script into the container and execute. Task completion occurs when the execute script finishes running, regardless of exit code (success or failure).
@@ -459,7 +459,7 @@ Environments in Rollout are containers, typically defined as Docker images using
    - Write captured stdout/stderr from agent execute to `<trial>/command/`
    - Generate `<trial>/result.json` with timing, cost, reward, and error information
 7. **Stop environment:** Stop the execution of the running container.
-8. **Clean up (optional):** If delete is set to true (this is default), clean up resources like built images, pod in kubernetes, etc.
+8. **Clean up (optional):** Unless `preserveEnv` is set to true, clean up environment resources. This is provider-specific: for Docker, the container is removed (`docker rm <container-id>`); for Modal, the Modal app is deleted; for Kubernetes, related resources are deleted (e.g., if executing as a Job, the Job resource is removed). Note that this is separate from `force_build`, which controls image caching rather than environment cleanup.
 
 **Error handling:** If a fatal error occurs at any phase (environment build, agent install/execution, verification, or teardown), the error details are written to `<trial>/error.txt` and the `error` field is populated in `result.json`. See [Error Types](#error-types) for all possible error types.
 
@@ -538,8 +538,8 @@ log_level: error # log level for rollout
 instruction_path: /tmp/instruction.md # path where instruction.md is copied in the container; $ROLLOUT_TASK_INSTRUCTION will contain this path
 environment:
   type: "docker" # or k8s, or modal, etc.
-  force_build: false # if true, bypass image cache and force a rebuild
-  delete: true # default true, clean up the environment upon completion of task, such as removing images, snapshots, etc.
+  force_build: false # if true, bypass image cache and force a rebuild. When set, builds from Dockerfile even if task specifies environment.docker_image
+  preserveEnv: false # default false. If true, preserves the environment after task completion. Behavior is provider-specific: for Docker, the container is kept (not removed via `docker rm`); for Modal, the Modal app is preserved; for Kubernetes, related resources (e.g., Jobs) are not deleted.
   override_cpus: 1 # if set, override task specific cpu config
   override_memory: 2G # if set, override task specific memory config
   override_storage: 30G # if set, override task specific storage config
