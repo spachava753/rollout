@@ -1,6 +1,6 @@
 # Rollout
 
-Rollout is a framework for evaluating and optimizing agents and models in container environments. Rollout can be used in many ways like building custom evals, optimizing prompts, running RL, generating SFT traces, and CI/CD agent testing.
+Rollout is a framework for evaluating and optimizing agents in container environments. Rollout can be used in many ways like building custom evals, optimizing prompts, running RL, generating SFT traces, and CI/CD agent testing.
 
 Defining and managing containerized tasks at scale is hard. Rollout is built to make it easy.
 
@@ -16,7 +16,7 @@ Rollout has the following core concetps:
 
 ### Task
 
-A task is a single instruction, container environment, and test script. Tasks are used to evaluate agents and models. A task is implemented as a directory of files in the following task format:
+A task is a single instruction, container environment, and test script. Tasks are used to evaluate agents. A task is implemented as a directory of files in the following task format:
 
 - **instruction.md**: The instruction is a markdown file that contains the task's instruction
 - **task.toml**: The `task.toml` file contains the task's configuration and metadata. Metadata is arbitrary and can consist of any information a task developer wants. Config params are nested into their respective sections rather than flat.
@@ -41,9 +41,9 @@ A task is a single instruction, container environment, and test script. Tasks ar
   [environment]
   build_timeout_sec = 600.0
   docker_image = "some-org/some-name:some-tag"
-  cpus = 1
-  memory_mb = 2048
-  storage_mb = 10240
+  cpus = "1"
+  memory_mb = "2048"
+  storage_mb = "10240"
   ```
 
   Configuration parameters:
@@ -53,7 +53,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
   "version": {
     description: "Version of the task configuration format.",
     type: "string",
-    default: '"1.0"',
+    default: "1.0",
     path: "version",
     required: true,
   },
@@ -163,7 +163,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
 
 ### Dataset
 
-A dataset is a collection of tasks. Datasets are used to evaluate agents and models. Usually, a dataset corresponds to a benchmark (e.g. Terminal-Bench, SWE-Bench Verified, SWE-Bench Pro, etc.). Datasets can optionally be distributed via a registry.
+A dataset is a collection of tasks. Datasets are used to evaluate agents. Usually, a dataset corresponds to a benchmark (e.g. Terminal-Bench, SWE-Bench Verified, SWE-Bench Pro, etc.). Datasets can optionally be distributed via a registry.
 
 Example structure of a dataset:
 
@@ -243,6 +243,50 @@ A dataset may also defined in a `registry.json` file, which looks like:
 
 A `registry.json` may contain multiple datasets, and each dataset may contain tasks that are from different repositories. Each task may also contain a path, and a git commit id.
 
+Note that the dataset `version` field does not map to a specific artifact like git SHA or image digest, and merely acts as metadata at the moment. If there are multiple versions of a dataset, each version will have to be explicitly defined separately in a registry like so:
+
+```json
+[
+  {
+    "name": "example multi version dataset",
+    "version": "1.0",
+    "description": "A single, simple task for debugging.",
+    "tasks": [
+      {
+        "name": "hello-world",
+        "git_url": "https://github.com/laude-institute/harbor.git",
+        "path": "examples/tasks/hello-world"
+      }
+    ]
+  },
+  {
+    "name": "example multi version dataset",
+    "version": "2.0",
+    "description": "A single, simple task for debugging.",
+    "tasks": [
+      {
+        "name": "hello-world",
+        "git_url": "https://github.com/laude-institute/harbor.git",
+        "path": "examples/tasks/hello-world"
+      }
+    ]
+  },
+
+  {
+    "name": "example multi version dataset",
+    "version": "alpha",
+    "description": "A single, simple task for debugging.",
+    "tasks": [
+      {
+        "name": "hello-world",
+        "git_url": "https://github.com/laude-institute/harbor.git",
+        "path": "examples/tasks/hello-world"
+      }
+    ]
+  }
+]
+```
+
 ### Agent
 
 An agent is a program that completes tasks. Agents are defined in the `job.yaml`. The agents block has the following structure:
@@ -261,7 +305,7 @@ agents:
 # ... other parts of job.yaml
 ```
 
-When executing the agent, the environment variable `$ROLLOUT_TASK_INSTRCUTIONS` is set, which contains the contents of `instructions.md` of the task.
+When executing the agent, the environment variable `$ROLLOUT_TASK_INSTRUCTION` is set, which contains the contents of `instruction.md` of the task.
 
 Here is an example agents definition for installing CPE.
 
@@ -382,16 +426,30 @@ agents:
 
       log "CPE installation complete!"
     execute: |
-      export PATH="/root/go/bin:/usr/local/go/bin:$PATH" && cpe -n -G --skip-stdin ${ROLLOUT_TASK_INSTRCUTIONS} 2>&1 | tee /logs/agent/cpe.txt
+      #!/bin/bash
+      set -euo pipefail
+
+      export PATH="/root/go/bin:/usr/local/go/bin:$PATH" && cpe -n -G --skip-stdin ${ROLLOUT_TASK_INSTRUCTION} 2>&1 | tee /logs/agent/cpe.txt
     env:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
 ```
 
 Note that when defining a [job](###Job), you may provide environment variables that are set before running the installation and execution script. This is especially helpful if you need certain inputs to execute the agent based on the job definition, such as a model id, or generation parameters.
 
+In addition, there exists a special `oracle` agent, in which the `solution/` folder is copied to the `/oracle` path, and executed from the working directory.
+
 ### Container environment
 
-Environments in Rollout are containers, typically defined as Docker images using a `Dockerfile` in a task. The environment is maybe created on demand, or may re-use an existing snapshot to reduce build time. By default, snapshots are not created due to worries of
+Environments in Rollout are containers, typically defined as Docker images using a `Dockerfile` in a task `environment/` folder, as well as any artifacts that are used in the process of building the image to execute, such as dependencies or zip file artifacts that should be copied to the `Dockerfile`. The execution of the task in the container follows flow:
+
+1. **Image building:** Build the image using the `environment/Dockerfile`. Some platforms like Modal and Fly can build on their platform, where as the if the `environment.type` in `job.yaml` is docker, the image is built locally.
+2. **Start environment:** Start container with built image in platform (create sandbox via API calls with image, or deploy to Kubernetes as a Pod, with sleep comand) and keep it running. When starting, inject the `$ROLLOUT_TASK_INSTRUCTION` environment variable, which contains the task instruction.
+3. **Install agent:** Copy the agent install script into the container and execute.
+4. **Execute agent:** Copy the agent execute script into the container and execute.
+5. **Verify:** Copy the tasks `tests/` folder into the container at `/tests` and execute `/tests/tests.sh`
+6. **Create trial output:** Copy `/logs` folder to host. We copy this folder before stopping the container, as we may not have access to the file system after the container is stopped.
+7. **Stop environment:** Stop the execution of the running container.
+8. **Clean up (optional):** if delete is set to true (this is default), clean up resources like built images, pod in kubernetes, etc.
 
 We aim to support many cloud providers and platforms out of the box, including Fly, Modal, and Kubernetes.
 
@@ -401,7 +459,7 @@ A trial is an agent's attempt at completing a task. Essentially, a trial is a ro
 
 ### Job
 
-A job is a collection of trials. Jobs are used to evaluate agents and models. A job can consist of multiple datasets, agents, tasks, and models. Jobs can be configured via `job.yaml` or `job.json` file. Jobs essentially map to a collection of trials.
+A job is a collection of trials. Jobs are used to evaluate agents across datasets. Jobs can be configured via `job.yaml` or `job.json` file. Jobs essentially map to a collection of trials.
 
 The structure of job looks like this:
 
@@ -409,18 +467,19 @@ The structure of job looks like this:
 name: Job name
 jobs_dir: jobs # the output directory to store trial results
 n_attempts: 1 # number of attempts
-timeout_multiplier: 1 # ?
+n_concurrent_trials: 4 # number of concurrent trials
+timeout_multiplier: 1.0 # allows you to globally scale the timeout durations for various operations within a job. Useful if running older hardware, and need to increase timeouts specified for a task, agent execution, or verifier execution
 log_level: error # log level for rollout
 environment:
   type: "docker" # or k8s, or modal, etc.
-  force_build: false # force a rebuild
-  delete: true # ?
-  override_cpus: 0 # if set, override task specific cpu config
-  override_memory_mb: 0 # if set, override task specific memory config
-  override_storage_mb: 0 # if set, override task specific storage config
+  force_build: false # force a rebuild of an environment
+  delete: true # default true, clean up the environment upon completion of task, such as removing images, snapshots, etc.
+  override_cpus: 1 # if set, override task specific cpu config
+  override_memory_mb: 2G # if set, override task specific memory config
+  override_storage_mb: 30G # if set, override task specific storage config
 verifier:
   override_timeout_sec: 0 # if set, override task specific verifier timeout
-  max_timeout_sec: 0 # if set, override task specific verifier max timeout
+  max_timeout_sec: 0 # if set, sets the ceiling of timeouts for verifiers
   disable: false # if set, disables executing verifier. Useful if you just want to collect trial execution traces
 metrics:
   - type: "mean" # can be one of sum, min, max, or mean, will print the metrics as jobs are executing
@@ -431,6 +490,17 @@ agents:
     execute: "execute bash script" # bash script to execute agent
     env:
       MY_API_KEY: ${MY_API_KEY}
+  - name: oracle
+datasets:
+  - path: ./path-to-dataset # path to a local dataset, a folder that contains tasks
+  - registry:
+      path: ./path-to-registry # path to a registry defining datasets
+    name: "dataset-name" # name of dataset as found in registry
+    version: "dataset-version" # version of dataset as found in registry
+  - registry:
+      url: https://raw.githubusercontent.com/laude-institute/harbor/refs/heads/main/registry.json # url to a registry defining datasets
+    name: "dataset-name" # name of dataset as found in registry
+    version: "dataset-version" # version of dataset as found in registry
 ```
 
 ## Usage
