@@ -138,12 +138,11 @@ A task is a single instruction, container environment, and test script. Tasks ar
 
   There are two ways to produce a reward file:
 
-  | Reward File                  | Format                                                       | Description                                                                                                 |
-  | ---------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-  | `/logs/verifier/reward.txt`  | Plain text (e.g. `1`)                                        | A plain text file containing a single integer or float value, typically `1` for success or `0` for failure. |
-  | `/logs/verifier/reward.json` | JSON (e.g. `{ "runtime_sec": 1.23, "accuracy": 0.95, ... }`) | A JSON file that can define multiple metrics as rewards, but they must be floats or integers.               |
+  | Reward File                  | Format                       | Description                                                                                                 |
+  | ---------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+  | `/logs/verifier/reward.txt`  | Plain text (e.g. `1`)        | A plain text file containing a single integer or float value, typically `1` for success or `0` for failure. |
 
-  You may use either `reward.txt` or `reward.json` as the output of your test script. Rollout will read `reward.txt` by default and fall back to `reward.json`.
+  Your test script must output `reward.txt`.
 
   Often, a reward can be determined by the exit code or a unit test command.
 
