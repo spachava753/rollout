@@ -25,5 +25,6 @@
 
 !*/
 
-# Keep repo spec tracked
+# Keep repo spec and architecture tracked
 !SPEC.md
+!ARCHITECTURE.md
