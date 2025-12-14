@@ -6,44 +6,45 @@ This document describes the internal architecture of Rollout, including Go inter
 
 Rollout follows a modular architecture with clear separation of concerns:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                  CLI Layer                                  │
-│                            (job.yaml parsing)                               │
-└─────────────────────────────────────┬───────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Job Orchestrator                               │
-│                  (trial generation, concurrency control)                    │
-└─────────────────────────────────────┬───────────────────────────────────────┘
-                                      │
-              ┌───────────────────────┼───────────────────────┐
-              ▼                       ▼                       ▼
-┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
-│   Task Loader       │   │   Dataset Loader    │   │   Registry Client   │
-│   (local files)     │   │   (local/registry)  │   │   (remote fetch)    │
-└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                             Trial Executor                                  │
-│                      (per-trial lifecycle management)                       │
-└─────────────────────────────────────┬───────────────────────────────────────┘
-                                      │
-              ┌───────────────────────┼───────────────────────┐
-              ▼                       ▼                       ▼
-┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
-│   Environment       │   │   Agent Executor    │   │   Verifier          │
-│   Provider          │   │                     │   │   Executor          │
-│   (Docker/K8s/...)  │   │                     │   │                     │
-└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            Result Collector                                 │
-│                    (trial results, job aggregation)                         │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph CLI["CLI Layer"]
+        JobYAML["job.yaml parsing"]
+    end
+
+    subgraph Orchestrator["Job Orchestrator"]
+        TrialGen["trial generation, concurrency control"]
+    end
+
+    subgraph Loaders["Loaders"]
+        TaskLoader["Task Loader<br/>(local files)"]
+        DatasetLoader["Dataset Loader<br/>(local/registry)"]
+        RegistryClient["Registry Client<br/>(remote fetch)"]
+    end
+
+    subgraph Executor["Trial Executor"]
+        Lifecycle["per-trial lifecycle management"]
+    end
+
+    subgraph Providers["Execution Components"]
+        EnvProvider["Environment Provider<br/>(Docker/K8s/...)"]
+        AgentExec["Agent Executor"]
+        Verifier["Verifier Executor"]
+    end
+
+    subgraph Results["Result Collector"]
+        Aggregation["trial results, job aggregation"]
+    end
+
+    CLI --> Orchestrator
+    Orchestrator --> TaskLoader
+    Orchestrator --> DatasetLoader
+    Orchestrator --> RegistryClient
+    Loaders --> Executor
+    Executor --> EnvProvider
+    Executor --> AgentExec
+    Executor --> Verifier
+    Providers --> Results
 ```
 
 ## Data Models
@@ -545,223 +546,123 @@ type JobOrchestrator interface {
 
 ### 1. Job Initialization
 
-```
-┌──────────────┐
-│  job.yaml    │
-└──────┬───────┘
-       │ parse
-       ▼
-┌──────────────┐     ┌──────────────┐
-│  JobConfig   │────▶│   Validate   │
-└──────────────┘     └──────┬───────┘
-                            │
-       ┌────────────────────┼────────────────────┐
-       ▼                    ▼                    ▼
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│ Load Agents  │     │ Load Datasets│     │ Setup Output │
-└──────────────┘     └──────┬───────┘     │    Dirs      │
-                            │             └──────────────┘
-              ┌─────────────┴─────────────┐
-              ▼                           ▼
-       ┌──────────────┐           ┌──────────────┐
-       │ Local Path   │           │   Registry   │
-       │   Loader     │           │    Loader    │
-       └──────┬───────┘           └──────┬───────┘
-              │                          │
-              │    ┌──────────────┐      │
-              └───▶│   Dataset    │◀─────┘
-                   │   []Task     │
-                   └──────────────┘
+```mermaid
+flowchart TB
+    JobYAML["job.yaml"] --> Parse
+    Parse --> JobConfig
+    JobConfig --> Validate
+
+    Validate --> LoadAgents["Load Agents"]
+    Validate --> LoadDatasets["Load Datasets"]
+    Validate --> SetupDirs["Setup Output Dirs"]
+
+    LoadDatasets --> LocalLoader["Local Path Loader"]
+    LoadDatasets --> RegistryLoader["Registry Loader"]
+
+    LocalLoader --> Dataset["Dataset<br/>[]Task"]
+    RegistryLoader --> Dataset
 ```
 
 ### 2. Trial Generation
 
-```
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│   Agents     │   │   Datasets   │   │  n_attempts  │
-│    [A1,A2]   │   │  [D1,D2]     │   │      3       │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                  │
-       └──────────────────┼──────────────────┘
-                          │
-                          ▼
-               ┌─────────────────────┐
-               │  Cartesian Product  │
-               │  (agent, task,      │
-               │   attempt)          │
-               └──────────┬──────────┘
-                          │
-                          ▼
-               ┌─────────────────────┐
-               │   []TrialSpec       │
-               │   A1-T1-1, A1-T1-2, │
-               │   A1-T1-3, A1-T2-1, │
-               │   ...               │
-               └─────────────────────┘
+```mermaid
+flowchart TB
+    Agents["Agents<br/>[A1, A2]"] --> Product
+    Datasets["Datasets<br/>[D1, D2]"] --> Product
+    NAttempts["n_attempts<br/>3"] --> Product
+
+    Product["Cartesian Product<br/>(agent, task, attempt)"] --> TrialSpecs
+
+    TrialSpecs["[]TrialSpec<br/>A1-T1-1, A1-T1-2,<br/>A1-T1-3, A1-T2-1, ..."]
 ```
 
 ### 3. Trial Execution (per trial)
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                              Trial Executor                                  │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ Phase 1: Environment Setup                                             │  │
-│  │                                                                        │  │
-│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐              │  │
-│  │  │ Build/Pull   │───▶│    Start     │───▶│ Copy Files   │              │  │
-│  │  │   Image      │    │  Container   │    │ instruction  │              │  │
-│  │  └──────────────┘    └──────────────┘    │ tests/       │              │  │
-│  │                                          └──────────────┘              │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ Phase 2: Agent Install                                                 │  │
-│  │                                                                        │  │
-│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐              │  │
-│  │  │ Copy install │───▶│    Execute   │───▶│   Capture    │              │  │
-│  │  │   script     │    │    script    │    │ stdout/stderr│              │  │
-│  │  └──────────────┘    └──────────────┘    └──────────────┘              │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                              (if success)                                    │
-│                                    ▼                                         │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ Phase 3: Agent Execute                                                 │  │
-│  │                                                                        │  │
-│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐              │  │
-│  │  │ Copy execute │───▶│    Execute   │───▶│   Capture    │              │  │
-│  │  │   script     │    │    script    │    │ stdout/stderr│              │  │
-│  │  └──────────────┘    └──────────────┘    └──────────────┘              │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                              (if success)                                    │
-│                                    ▼                                         │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ Phase 4: Verification                                                  │  │
-│  │                                                                        │  │
-│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐              │  │
-│  │  │   Execute    │───▶│   Capture    │───▶│ Read reward  │              │  │
-│  │  │  test.sh     │    │ stdout/stderr│    │   file       │              │  │
-│  │  └──────────────┘    └──────────────┘    └──────────────┘              │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ Phase 5: Result Collection                                             │  │
-│  │                                                                        │  │
-│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐              │  │
-│  │  │  Copy /logs  │───▶│    Write     │───▶│   Calculate  │              │  │
-│  │  │  to host     │    │ result.json  │    │    cost      │              │  │
-│  │  └──────────────┘    └──────────────┘    └──────────────┘              │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │ Phase 6: Teardown                                                      │  │
-│  │                                                                        │  │
-│  │  ┌──────────────┐    ┌──────────────┐                                  │  │
-│  │  │    Stop      │───▶│   Cleanup    │  (based on preserve_env policy)  │  │
-│  │  │  container   │    │  resources   │                                  │  │
-│  │  └──────────────┘    └──────────────┘                                  │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph TrialExecutor["Trial Executor"]
+        subgraph Phase1["Phase 1: Environment Setup"]
+            BuildPull["Build/Pull Image"] --> StartContainer["Start Container"]
+            StartContainer --> CopyFiles["Copy Files<br/>instruction, tests/"]
+        end
+
+        subgraph Phase2["Phase 2: Agent Install"]
+            CopyInstall["Copy install script"] --> ExecInstall["Execute script"]
+            ExecInstall --> CaptureInstall["Capture stdout/stderr"]
+        end
+
+        subgraph Phase3["Phase 3: Agent Execute"]
+            CopyExec["Copy execute script"] --> ExecAgent["Execute script"]
+            ExecAgent --> CaptureExec["Capture stdout/stderr"]
+        end
+
+        subgraph Phase4["Phase 4: Verification"]
+            ExecTest["Execute test.sh"] --> CaptureTest["Capture stdout/stderr"]
+            CaptureTest --> ReadReward["Read reward file"]
+        end
+
+        subgraph Phase5["Phase 5: Result Collection"]
+            CopyLogs["Copy /logs to host"] --> WriteResult["Write result.json"]
+            WriteResult --> CalcCost["Calculate cost"]
+        end
+
+        subgraph Phase6["Phase 6: Teardown"]
+            StopContainer["Stop container"] --> Cleanup["Cleanup resources"]
+        end
+
+        Phase1 --> Phase2
+        Phase2 -->|if success| Phase3
+        Phase3 -->|if success| Phase4
+        Phase4 --> Phase5
+        Phase5 --> Phase6
+    end
 ```
 
 ### 4. Concurrent Execution
 
 Uses a fan-out/fan-in pattern with channels for coordination.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            Job Orchestrator                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌──────────────┐                                                           │
-│  │  []TrialSpec │                                                           │
-│  └──────┬───────┘                                                           │
-│         │                                                                   │
-│         ▼                                                                   │
-│  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │         Trial Input Channel (chan TrialSpec)                    │        │
-│  └─────────────────────────────────────────────────────────────────┘        │
-│         │                                                                   │
-│         │  n_concurrent_trials = 4 (fan-out)                                │
-│         │                                                                   │
-│         ├──────────────┬──────────────┬──────────────┐                      │
-│         ▼              ▼              ▼              ▼                      │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐                │
-│  │  Worker 1  │ │  Worker 2  │ │  Worker 3  │ │  Worker 4  │                │
-│  │            │ │            │ │            │ │            │                │
-│  │ ┌────────┐ │ │ ┌────────┐ │ │ ┌────────┐ │ │ ┌────────┐ │                │
-│  │ │ Trial  │ │ │ │ Trial  │ │ │ │ Trial  │ │ │ │ Trial  │ │                │
-│  │ │Executor│ │ │ │Executor│ │ │ │Executor│ │ │ │Executor│ │                │
-│  │ └────────┘ │ │ └────────┘ │ │ └────────┘ │ │ └────────┘ │                │
-│  └─────┬──────┘ └─────┬──────┘ └─────┬──────┘ └─────┬──────┘                │
-│        │              │              │              │                       │
-│        └──────────────┴──────────────┴──────────────┘                       │
-│                              │                                              │
-│                              ▼ (fan-in)                                     │
-│  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │        Result Channel (chan *TrialResult)                       │        │
-│  └─────────────────────────────────────────────────────────────────┘        │
-│                              │                                              │
-│                              ▼                                              │
-│                   ┌──────────────────┐                                      │
-│                   │ Result Collector │                                      │
-│                   │   (single        │                                      │
-│                   │    goroutine)    │                                      │
-│                   └────────┬─────────┘                                      │
-│                            │                                                │
-│                            ▼                                                │
-│                   ┌──────────────────┐                                      │
-│                   │  Write to disk   │                                      │
-│                   │  as completed    │                                      │
-│                   └──────────────────┘                                      │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Orchestrator["Job Orchestrator"]
+        TrialSpecs["[]TrialSpec"] --> InputChan
+
+        InputChan["Trial Input Channel<br/>(chan TrialSpec)"] --> W1
+        InputChan --> W2
+        InputChan --> W3
+        InputChan --> W4
+
+        subgraph Workers["n_concurrent_trials = 4 (fan-out)"]
+            W1["Worker 1<br/>TrialExecutor"]
+            W2["Worker 2<br/>TrialExecutor"]
+            W3["Worker 3<br/>TrialExecutor"]
+            W4["Worker 4<br/>TrialExecutor"]
+        end
+
+        W1 --> ResultChan
+        W2 --> ResultChan
+        W3 --> ResultChan
+        W4 --> ResultChan
+
+        ResultChan["Result Channel (fan-in)<br/>(chan *TrialResult)"] --> Collector
+
+        Collector["Result Collector<br/>(single goroutine)"] --> WriteDisk["Write to disk<br/>as completed"]
+    end
 ```
 
 ### 5. Result Aggregation
 
-```
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│ TrialResult  │   │ TrialResult  │   │ TrialResult  │
-│    #1        │   │    #2        │   │    #N        │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                  │
-       └──────────────────┼──────────────────┘
-                          │
-                          ▼
-               ┌─────────────────────┐
-               │  Result Collector   │
-               │                     │
-               │  - Count completed  │
-               │  - Count failed     │
-               │  - Sum costs        │
-               │  - Calculate mean   │
-               │  - Group by agent   │
-               └──────────┬──────────┘
-                          │
-                          ▼
-               ┌─────────────────────┐
-               │     JobResult       │
-               │                     │
-               │  - pass_rate        │
-               │  - mean_reward      │
-               │  - total_cost       │
-               │  - agent summaries  │
-               └──────────┬──────────┘
-                          │
-                          ▼
-               ┌─────────────────────┐
-               │  jobs/<name>/       │
-               │    result.json      │
-               └─────────────────────┘
+```mermaid
+flowchart TB
+    TR1["TrialResult #1"] --> Collector
+    TR2["TrialResult #2"] --> Collector
+    TRN["TrialResult #N"] --> Collector
+
+    Collector["Result Collector<br/>- Count completed<br/>- Count failed<br/>- Sum costs<br/>- Calculate mean<br/>- Group by agent"]
+
+    Collector --> JobResult["JobResult<br/>- pass_rate<br/>- mean_reward<br/>- total_cost<br/>- agent summaries"]
+
+    JobResult --> OutputFile["jobs/&lt;name&gt;/<br/>result.json"]
 ```
 
 ## Package Structure
