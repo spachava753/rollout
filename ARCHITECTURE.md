@@ -84,13 +84,29 @@ type EnvironmentConfig struct {
 ```go
 // Task represents a fully loaded task ready for execution.
 type Task struct {
-	Name            string
-	InstructionPath string // path to instruction.md
-	EnvironmentPath string // path to environment/ directory
-	SolutionPath    string // path to solution/ directory (may be empty)
-	TestsPath       string // path to tests/ directory
-	Config          TaskConfig
-	GitCommitID     *string // resolved git SHA, nil if not in git repo
+	Name        string
+	FS          fs.FS       // filesystem rooted at task directory
+	Config      TaskConfig
+	GitCommitID *string     // resolved git SHA, nil if not in git repo
+}
+
+// Task provides methods to access well-known paths within the task filesystem.
+// These return fs.File or sub-filesystems for the task components.
+
+func (t *Task) Instruction() (fs.File, error) {
+	return t.FS.Open("instruction.md")
+}
+
+func (t *Task) Environment() (fs.FS, error) {
+	return fs.Sub(t.FS, "environment")
+}
+
+func (t *Task) Solution() (fs.FS, error) {
+	return fs.Sub(t.FS, "solution")
+}
+
+func (t *Task) Tests() (fs.FS, error) {
+	return fs.Sub(t.FS, "tests")
 }
 ```
 
@@ -360,10 +376,12 @@ type TrialSummary struct {
 
 ### Environment Provider
 
-The environment provider abstracts container runtime implementations.
+The environment provider is a factory that creates environments. Each provider implementation (Docker, Modal, Kubernetes) returns its own concrete `Environment` that knows how to manage itself.
 
 ```go
 // Environment represents a running container environment.
+// Each provider returns its own implementation (DockerEnvironment, ModalEnvironment, etc.)
+// that encapsulates provider-specific details like container IDs or app references.
 type Environment interface {
 	// ID returns the unique identifier for this environment.
 	ID() string
@@ -379,6 +397,14 @@ type Environment interface {
 
 	// Stop stops the environment but does not remove it.
 	Stop(ctx context.Context) error
+
+	// Destroy removes the environment and cleans up all resources.
+	// This is provider-specific: removes Docker containers, deletes Modal apps, etc.
+	Destroy(ctx context.Context) error
+
+	// Cost returns the cost incurred by this environment.
+	// Tracked internally by the implementation based on resource usage and duration.
+	Cost() float64
 }
 
 type ExecOptions struct {
@@ -393,7 +419,9 @@ type ExecResult struct {
 	ExitCode int
 }
 
-// EnvironmentProvider creates and manages container environments.
+// EnvironmentProvider is a factory for creating environments.
+// It handles image building/pulling and environment creation.
+// Lifecycle management (destroy, cost) is delegated to the Environment itself.
 type EnvironmentProvider interface {
 	// Name returns the provider name (e.g., "docker", "modal", "k8s").
 	Name() string
@@ -406,13 +434,8 @@ type EnvironmentProvider interface {
 	PullImage(ctx context.Context, imageRef string) error
 
 	// CreateEnvironment creates and starts a new environment from an image.
+	// The returned Environment handles its own lifecycle (Stop, Destroy, Cost).
 	CreateEnvironment(ctx context.Context, opts CreateEnvironmentOptions) (Environment, error)
-
-	// DestroyEnvironment removes the environment and cleans up resources.
-	DestroyEnvironment(ctx context.Context, env Environment) error
-
-	// CalculateCost returns the cost incurred by the environment.
-	CalculateCost(ctx context.Context, env Environment, duration time.Duration) (float64, error)
 }
 
 type BuildImageOptions struct {
@@ -437,8 +460,9 @@ type CreateEnvironmentOptions struct {
 ```go
 // TaskLoader loads tasks from various sources.
 type TaskLoader interface {
-	// LoadTask loads a single task from a directory path.
-	LoadTask(ctx context.Context, path string) (*Task, error)
+	// LoadTask loads a single task from a filesystem.
+	// The fsys should be rooted at the task directory.
+	LoadTask(ctx context.Context, fsys fs.FS) (*Task, error)
 
 	// ValidateTask validates a task's structure and configuration.
 	ValidateTask(task *Task) error
@@ -450,10 +474,12 @@ type TaskLoader interface {
 ```go
 // DatasetLoader loads datasets from local paths or registries.
 type DatasetLoader interface {
-	// LoadFromPath loads all tasks from a local dataset directory.
-	LoadFromPath(ctx context.Context, path string) (*Dataset, error)
+	// LoadFromFS loads all tasks from a dataset filesystem.
+	// The fsys should be rooted at the dataset directory containing task subdirectories.
+	LoadFromFS(ctx context.Context, fsys fs.FS, name string) (*Dataset, error)
 
 	// LoadFromRegistry loads a dataset from a registry.
+	// Downloads tasks to a local cache and returns the loaded dataset.
 	LoadFromRegistry(ctx context.Context, registry RegistryRef, name, version string) (*Dataset, error)
 }
 ```
@@ -486,11 +512,14 @@ type TrialExecutor interface {
 
 ```go
 // ResultCollector aggregates and persists trial results.
+// Designed to be run as a single goroutine consuming from a result channel.
 type ResultCollector interface {
-	// RecordTrial records a completed trial result.
-	RecordTrial(result *TrialResult) error
+	// Run consumes results from the channel until it's closed.
+	// Writes each trial result to disk as it arrives.
+	Run(ctx context.Context, results <-chan *TrialResult) error
 
 	// GetJobResult returns the aggregated job result.
+	// Should only be called after Run completes.
 	GetJobResult() *JobResult
 
 	// Finalize writes the final job result to disk.
@@ -645,6 +674,8 @@ type JobOrchestrator interface {
 
 ### 4. Concurrent Execution
 
+Uses a fan-out/fan-in pattern with channels for coordination.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            Job Orchestrator                                 │
@@ -656,10 +687,10 @@ type JobOrchestrator interface {
 │         │                                                                   │
 │         ▼                                                                   │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │              Trial Queue (bounded channel)                      │        │
+│  │         Trial Input Channel (chan TrialSpec)                    │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
 │         │                                                                   │
-│         │  n_concurrent_trials = 4                                          │
+│         │  n_concurrent_trials = 4 (fan-out)                                │
 │         │                                                                   │
 │         ├──────────────┬──────────────┬──────────────┐                      │
 │         ▼              ▼              ▼              ▼                      │
@@ -674,10 +705,16 @@ type JobOrchestrator interface {
 │        │              │              │              │                       │
 │        └──────────────┴──────────────┴──────────────┘                       │
 │                              │                                              │
+│                              ▼ (fan-in)                                     │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │        Result Channel (chan *TrialResult)                       │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                              │                                              │
 │                              ▼                                              │
 │                   ┌──────────────────┐                                      │
 │                   │ Result Collector │                                      │
-│                   │   (mutex-safe)   │                                      │
+│                   │   (single        │                                      │
+│                   │    goroutine)    │                                      │
 │                   └────────┬─────────┘                                      │
 │                            │                                                │
 │                            ▼                                                │
@@ -752,18 +789,17 @@ rollout/
 │   ├── executor/
 │   │   ├── trial.go          # TrialExecutor implementation
 │   │   └── orchestrator.go   # JobOrchestrator implementation
+│   ├── models/
+│   │   ├── task.go           # Task, TaskConfig types
+│   │   ├── agent.go          # Agent type
+│   │   ├── trial.go          # Trial, TrialResult types
+│   │   ├── job.go            # JobConfig, JobResult types
+│   │   └── errors.go         # ErrorType constants
 │   ├── result/
 │   │   ├── collector.go      # ResultCollector implementation
 │   │   └── metrics.go        # Metric calculations
 │   └── task/
 │       └── loader.go         # TaskLoader implementation
-├── pkg/
-│   └── models/
-│       ├── task.go           # Task, TaskConfig types
-│       ├── agent.go          # Agent type
-│       ├── trial.go          # Trial, TrialResult types
-│       ├── job.go            # JobConfig, JobResult types
-│       └── errors.go         # ErrorType constants
 └── go.mod
 ```
 
@@ -781,7 +817,8 @@ rollout/
 
 ## Concurrency Model
 
-- **Trial execution**: Uses a worker pool pattern with `n_concurrent_trials` workers consuming from a trial queue.
-- **Result collection**: Uses a mutex-protected collector to safely aggregate results from concurrent workers.
+- **Fan-out**: `n_concurrent_trials` worker goroutines consume from a shared input channel (`chan TrialSpec`).
+- **Fan-in**: Workers send completed results to a single result channel (`chan *TrialResult`).
+- **Result collection**: A dedicated collector goroutine reads from the result channel and writes to disk. No mutex needed—single consumer.
 - **Context propagation**: All long-running operations accept `context.Context` for cancellation support.
 - **Resource cleanup**: Uses `defer` patterns to ensure environments are cleaned up even on panic/error.
