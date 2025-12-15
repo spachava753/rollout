@@ -36,11 +36,11 @@ Initial implementation complete. The framework can execute tasks using the Docke
 ### Running Tests
 
 ```bash
-# Unit tests only
-go test ./...
+# Fast unit tests (skips integration tests)
+go test -short ./...
 
-# Integration tests (requires Docker)
-ROLLOUT_INTEGRATION_TEST=1 go test -v ./internal/executor/...
+# All tests including integration tests (requires Docker)
+go test -v ./internal/executor/...
 ```
 
 ### Building
