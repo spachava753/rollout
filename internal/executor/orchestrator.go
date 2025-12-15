@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/spachava753/rollout/internal/config"
@@ -94,7 +95,6 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 	}
 	jobDir := filepath.Join(o.cfg.JobsDir, jobName)
 
-	// Check if job directory already exists
 	if _, err := os.Stat(jobDir); err == nil {
 		return nil, fmt.Errorf("job directory already exists: %s (will not overwrite existing results)", jobDir)
 	}
@@ -119,39 +119,102 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 		}
 	}
 
-	// Execute trials
-	executor := o.newExecutor(o.cfg)
-	var results []*models.TrialResult
-
-	for _, trial := range trials {
-		// Create output directory
-		os.MkdirAll(trial.OutputDir, 0755)
-
-		result, err := executor.Execute(ctx, trial, o.provider)
-		if err != nil {
-			return nil, fmt.Errorf("executing trial %s: %w", trial.ID, err)
-		}
-
-		// Save trial result
-		resultJSON, _ := json.MarshalIndent(result, "", "  ")
-		os.WriteFile(filepath.Join(trial.OutputDir, "result.json"), resultJSON, 0644)
-
-		// Write error file if applicable
-		if result.Error != nil {
-			os.WriteFile(filepath.Join(trial.OutputDir, "error.txt"), []byte(result.Error.Message), 0644)
-		}
-
-		results = append(results, result)
+	// Execute trials concurrently
+	nWorkers := o.cfg.NConcurrentTrials
+	if nWorkers <= 0 {
+		nWorkers = 1
 	}
+	if nWorkers > len(trials) {
+		nWorkers = len(trials)
+	}
+
+	results, skipped := o.runConcurrent(ctx, trials, nWorkers)
 
 	// Aggregate results
 	jobResult := o.aggregateResults(jobName, results, startTime)
+	jobResult.SkippedTrials = skipped
+	if skipped > 0 {
+		jobResult.Cancelled = true
+	}
 
 	// Save job result
 	jobResultJSON, _ := json.MarshalIndent(jobResult, "", "  ")
 	os.WriteFile(filepath.Join(jobDir, "result.json"), jobResultJSON, 0644)
 
 	return jobResult, nil
+}
+
+// runConcurrent executes trials using a fan-out/fan-in pattern.
+// Returns collected results and count of skipped trials.
+func (o *JobOrchestrator) runConcurrent(ctx context.Context, trials []models.Trial, nWorkers int) ([]*models.TrialResult, int) {
+	trialChan := make(chan models.Trial) // unbuffered
+	resultChan := make(chan *models.TrialResult, len(trials))
+
+	var wg sync.WaitGroup
+
+	// Start workers
+	for range nWorkers {
+		wg.Go(func() {
+			executor := o.newExecutor(o.cfg)
+
+			for trial := range trialChan {
+				os.MkdirAll(trial.OutputDir, 0755)
+
+				result, err := executor.Execute(ctx, trial, o.provider)
+				if err != nil {
+					result = &models.TrialResult{
+						TaskName:    trial.Task.Name,
+						DatasetName: trial.Dataset,
+						AgentName:   trial.Agent.Name,
+						Attempt:     trial.Attempt,
+						Error: &models.TrialError{
+							Type:    models.ErrInternalError,
+							Message: err.Error(),
+						},
+					}
+				}
+
+				resultJSON, _ := json.MarshalIndent(result, "", "  ")
+				os.WriteFile(filepath.Join(trial.OutputDir, "result.json"), resultJSON, 0644)
+
+				if result.Error != nil {
+					os.WriteFile(filepath.Join(trial.OutputDir, "error.txt"), []byte(result.Error.Message), 0644)
+				}
+
+				resultChan <- result
+			}
+		})
+	}
+
+	// Feeder goroutine: sends trials to workers, respects context cancellation
+	fed := 0
+	go func() {
+		defer close(trialChan)
+		for _, trial := range trials {
+			select {
+			case <-ctx.Done():
+				return
+			case trialChan <- trial:
+				fed++
+			}
+		}
+	}()
+
+	// Wait for workers to finish, then close result channel
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results
+	var results []*models.TrialResult
+	for result := range resultChan {
+		results = append(results, result)
+	}
+
+	skipped := max(len(trials)-len(results), 0)
+
+	return results, skipped
 }
 
 func (o *JobOrchestrator) aggregateResults(jobName string, results []*models.TrialResult, startTime time.Time) *models.JobResult {
@@ -178,7 +241,6 @@ func (o *JobOrchestrator) aggregateResults(jobName string, results []*models.Tri
 	})
 
 	for _, r := range results {
-		// Track per-agent stats
 		ad := agentData[r.AgentName]
 		ad.total++
 		ad.cost += r.Cost
@@ -210,7 +272,6 @@ func (o *JobOrchestrator) aggregateResults(jobName string, results []*models.Tri
 		jr.MeanReward = totalReward / float64(rewardCount)
 	}
 
-	// Calculate pass rate (reward == 1.0)
 	var passCount int
 	for _, r := range results {
 		if r.Reward != nil && *r.Reward == 1.0 {
@@ -221,7 +282,6 @@ func (o *JobOrchestrator) aggregateResults(jobName string, results []*models.Tri
 		jr.PassRate = float64(passCount) / float64(jr.CompletedTrials)
 	}
 
-	// Build per-agent summaries
 	for agentName, ad := range agentData {
 		var meanReward float64
 		if len(ad.rewards) > 0 {

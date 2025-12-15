@@ -23,7 +23,7 @@ Initial implementation complete. The framework can execute tasks using the Docke
 ### Not Yet Implemented
 
 - Registry-based dataset loading (remote git repos)
-- Concurrent trial execution (fan-out/fan-in pattern)
+- ~~Concurrent trial execution (fan-out/fan-in pattern)~~ ✅
 - Modal and Kubernetes environment providers
 - Result collector as separate component
 - Retry logic for transient failures

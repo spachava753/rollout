@@ -18,11 +18,11 @@ type JobConfig struct {
 	NAttempts         int                  `yaml:"n_attempts" json:"n_attempts"`
 	NConcurrentTrials int                  `yaml:"n_concurrent_trials" json:"n_concurrent_trials"`
 	TimeoutMultiplier float64              `yaml:"timeout_multiplier" json:"timeout_multiplier"`
-	Retry             RetryConfig          `yaml:"retry,omitempty" json:"retry,omitempty"`
+	Retry             RetryConfig          `yaml:"retry,omitempty" json:"retry"`
 	LogLevel          string               `yaml:"log_level,omitempty" json:"log_level,omitempty"`
 	InstructionPath   string               `yaml:"instruction_path" json:"instruction_path"`
 	Environment       JobEnvironmentConfig `yaml:"environment" json:"environment"`
-	Verifier          JobVerifierConfig    `yaml:"verifier,omitempty" json:"verifier,omitempty"`
+	Verifier          JobVerifierConfig    `yaml:"verifier,omitempty" json:"verifier"`
 	Metrics           []MetricConfig       `yaml:"metrics,omitempty" json:"metrics,omitempty"`
 	Agents            []Agent              `yaml:"agents" json:"agents"`
 	Datasets          []DatasetRef         `yaml:"datasets" json:"datasets"`

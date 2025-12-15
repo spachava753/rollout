@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -280,9 +281,7 @@ func (e *DefaultTrialExecutor) executeAgent(ctx context.Context, trial models.Tr
 	var stdout, stderr bytes.Buffer
 
 	execEnv := make(map[string]string)
-	for k, v := range trial.Agent.Env {
-		execEnv[k] = v
-	}
+	maps.Copy(execEnv, trial.Agent.Env)
 	execEnv["ROLLOUT_TASK_INSTRUCTION"] = e.InstructionPath
 
 	exitCode, err := env.Exec(ctx, cmd, &stdout, &stderr, environment.ExecOptions{
