@@ -15,22 +15,22 @@ import (
 	"github.com/spachava753/rollout/internal/models"
 )
 
-// TrialExecutor runs a single trial through all phases.
-type TrialExecutor struct {
+// DefaultTrialExecutor runs a single trial through all phases.
+type DefaultTrialExecutor struct {
 	InstructionPath   string
 	TimeoutMultiplier float64
 }
 
 // NewTrialExecutor creates a new trial executor.
-func NewTrialExecutor(instructionPath string, timeoutMult float64) *TrialExecutor {
-	return &TrialExecutor{
+func NewTrialExecutor(instructionPath string, timeoutMult float64) *DefaultTrialExecutor {
+	return &DefaultTrialExecutor{
 		InstructionPath:   instructionPath,
 		TimeoutMultiplier: timeoutMult,
 	}
 }
 
 // Execute runs the trial and returns the result.
-func (e *TrialExecutor) Execute(ctx context.Context, trial models.Trial, provider environment.Provider) (*models.TrialResult, error) {
+func (e *DefaultTrialExecutor) Execute(ctx context.Context, trial models.Trial, provider environment.Provider) (*models.TrialResult, error) {
 	result := &models.TrialResult{
 		TaskName:        trial.Task.Name,
 		DatasetName:     trial.Dataset,
@@ -175,7 +175,7 @@ func (e *TrialExecutor) Execute(ctx context.Context, trial models.Trial, provide
 	return result, nil
 }
 
-func (e *TrialExecutor) setupEnvironment(ctx context.Context, trial models.Trial, provider environment.Provider) (environment.Environment, error) {
+func (e *DefaultTrialExecutor) setupEnvironment(ctx context.Context, trial models.Trial, provider environment.Provider) (environment.Environment, error) {
 	// Build image
 	envDir := filepath.Join(trial.Task.Path, "environment")
 	tag := fmt.Sprintf("rollout-%s-%s:%d", trial.Task.Name, trial.Agent.Name, time.Now().UnixNano())
@@ -204,7 +204,7 @@ func (e *TrialExecutor) setupEnvironment(ctx context.Context, trial models.Trial
 	return env, nil
 }
 
-func (e *TrialExecutor) installAgent(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult) error {
+func (e *DefaultTrialExecutor) installAgent(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult) error {
 	if trial.Agent.IsOracle() {
 		// Oracle agent: copy solution
 		solDir := filepath.Join(trial.Task.Path, "solution")
@@ -264,7 +264,7 @@ func (e *TrialExecutor) installAgent(ctx context.Context, trial models.Trial, en
 	return nil
 }
 
-func (e *TrialExecutor) executeAgent(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult) error {
+func (e *DefaultTrialExecutor) executeAgent(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult) error {
 	var cmd string
 	if trial.Agent.IsOracle() {
 		cmd = "bash /oracle/solve.sh"
@@ -324,7 +324,7 @@ func (e *TrialExecutor) executeAgent(ctx context.Context, trial models.Trial, en
 	return nil
 }
 
-func (e *TrialExecutor) runVerifier(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult) error {
+func (e *DefaultTrialExecutor) runVerifier(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult) error {
 	timeout := time.Duration(trial.Task.Config.Verifier.TimeoutSec*e.TimeoutMultiplier) * time.Second
 	var stdout, stderr bytes.Buffer
 

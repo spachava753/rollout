@@ -15,14 +15,23 @@ import (
 	"github.com/spachava753/rollout/internal/models"
 )
 
+// TrialExecutor executes a single trial and returns the result.
+type TrialExecutor interface {
+	Execute(ctx context.Context, trial models.Trial, provider environment.Provider) (*models.TrialResult, error)
+}
+
+// NewTrialExecutorFunc creates a TrialExecutor from a JobConfig.
+type NewTrialExecutorFunc func(cfg models.JobConfig) TrialExecutor
+
 // JobOrchestrator coordinates the execution of all trials in a job.
 type JobOrchestrator struct {
-	cfg      models.JobConfig
-	provider environment.Provider
+	cfg         models.JobConfig
+	provider    environment.Provider
+	newExecutor NewTrialExecutorFunc
 }
 
 // NewJobOrchestrator creates a new job orchestrator.
-func NewJobOrchestrator(cfg models.JobConfig) (*JobOrchestrator, error) {
+func NewJobOrchestrator(cfg models.JobConfig, executorFactory NewTrialExecutorFunc) (*JobOrchestrator, error) {
 	var provider environment.Provider
 	switch cfg.Environment.Type {
 	case "docker":
@@ -32,8 +41,9 @@ func NewJobOrchestrator(cfg models.JobConfig) (*JobOrchestrator, error) {
 	}
 
 	return &JobOrchestrator{
-		cfg:      cfg,
-		provider: provider,
+		cfg:         cfg,
+		provider:    provider,
+		newExecutor: executorFactory,
 	}, nil
 }
 
@@ -83,6 +93,12 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 		jobName = *o.cfg.Name
 	}
 	jobDir := filepath.Join(o.cfg.JobsDir, jobName)
+
+	// Check if job directory already exists
+	if _, err := os.Stat(jobDir); err == nil {
+		return nil, fmt.Errorf("job directory already exists: %s (will not overwrite existing results)", jobDir)
+	}
+
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating job directory: %w", err)
 	}
@@ -96,8 +112,15 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 	cfgJSON, _ := json.MarshalIndent(o.cfg, "", "  ")
 	os.WriteFile(filepath.Join(jobDir, "config.json"), cfgJSON, 0644)
 
+	// Check that no trial output directories already exist
+	for _, trial := range trials {
+		if _, err := os.Stat(trial.OutputDir); err == nil {
+			return nil, fmt.Errorf("trial output directory already exists: %s (will not overwrite existing results)", trial.OutputDir)
+		}
+	}
+
 	// Execute trials
-	executor := NewTrialExecutor(o.cfg.InstructionPath, o.cfg.TimeoutMultiplier)
+	executor := o.newExecutor(o.cfg)
 	var results []*models.TrialResult
 
 	for _, trial := range trials {
@@ -232,6 +255,11 @@ func (o *JobOrchestrator) aggregateResults(jobName string, results []*models.Tri
 	return jr
 }
 
+// DefaultTrialExecutorFunc creates a default trial executor.
+func DefaultTrialExecutorFunc(cfg models.JobConfig) TrialExecutor {
+	return NewTrialExecutor(cfg.InstructionPath, cfg.TimeoutMultiplier)
+}
+
 // RunFromConfig loads a job config file and executes the job.
 func RunFromConfig(ctx context.Context, configPath string) (*models.JobResult, error) {
 	cfg, err := config.LoadJobConfig(configPath)
@@ -239,7 +267,7 @@ func RunFromConfig(ctx context.Context, configPath string) (*models.JobResult, e
 		return nil, fmt.Errorf("loading job config: %w", err)
 	}
 
-	orchestrator, err := NewJobOrchestrator(cfg)
+	orchestrator, err := NewJobOrchestrator(cfg, DefaultTrialExecutorFunc)
 	if err != nil {
 		return nil, fmt.Errorf("creating orchestrator: %w", err)
 	}
