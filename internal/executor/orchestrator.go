@@ -13,6 +13,7 @@ import (
 	"github.com/spachava753/rollout/internal/dataset"
 	"github.com/spachava753/rollout/internal/environment"
 	"github.com/spachava753/rollout/internal/environment/docker"
+	"github.com/spachava753/rollout/internal/environment/modal"
 	"github.com/spachava753/rollout/internal/models"
 )
 
@@ -37,6 +38,13 @@ func NewJobOrchestrator(cfg models.JobConfig, executorFactory NewTrialExecutorFu
 	switch cfg.Environment.Type {
 	case "docker":
 		provider = docker.NewProvider()
+	case "modal":
+		modalCfg := modal.ParseProviderConfig(cfg.Environment.ProviderConfig)
+		var err error
+		provider, err = modal.NewProvider(modalCfg)
+		if err != nil {
+			return nil, fmt.Errorf("creating modal provider: %w", err)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported environment type: %s", cfg.Environment.Type)
 	}

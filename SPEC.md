@@ -580,8 +580,10 @@ environment:
   preserve_env: "on_failure" # One of "always", "never", "on_failure". Default is "never". Controls when to preserve the environment after task completion.
   provider_config: # Provider-specific configuration. Structure depends on environment.type.
     # Example for Modal:
-    # app_prefix: "rollout-"
-    # region: "us-east"
+    # app_name: "rollout-my-app"  # Optional: Name of the Modal app to use
+    # region: "us-east"           # Optional: Single region to run in
+    # regions: ["us-east", "us-west"]  # Optional: Multiple regions
+    # verbose: true               # Optional: Enable detailed sandbox logging
     # Example for Kubernetes:
     # namespace: "rollout-evals"
     # service_account: "rollout-runner"
@@ -589,7 +591,7 @@ environment:
     #   gpu: "true"
     # Example for Docker:
     # network: "rollout-net"
-    # runtime: "nvidia" # One of "always", "never", "on_failure". Default is "never". Controls when to preserve the environment after task completion. Behavior is provider-specific: for Docker, the container is kept (not removed via `docker rm`); for Modal, the Modal app is preserved; for Kubernetes, related resources (e.g., Jobs) are not deleted.
+    # runtime: "nvidia"
   override_cpus: 1 # if set, override task specific cpu config
   override_memory: 2G # if set, override task specific memory config
   override_storage: 30G # if set, override task specific storage config

@@ -675,11 +675,11 @@ rollout/
 │   ├── environment/
 │   │   ├── provider.go       # EnvironmentProvider interface
 │   │   ├── docker/
-│   │   │   └── docker.go     # Docker provider
+│   │   │   └── docker.go     # Docker provider (local containers)
 │   │   ├── modal/
-│   │   │   └── modal.go      # Modal provider
+│   │   │   └── modal.go      # Modal provider (cloud sandboxes via modal-go SDK)
 │   │   └── k8s/
-│   │       └── k8s.go        # Kubernetes provider
+│   │       └── k8s.go        # Kubernetes provider (future)
 │   ├── executor/
 │   │   ├── trial.go          # TrialExecutor implementation
 │   │   └── orchestrator.go   # JobOrchestrator implementation
