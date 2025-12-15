@@ -272,10 +272,10 @@ type TrialError struct {
 
 type Durations struct {
 	TotalSec            float64  `json:"total_sec"`
-	EnvironmentSetupSec float64  `json:"environment_setup_sec"`
-	AgentSetupSec       float64  `json:"agent_setup_sec"`
-	AgentExecutionSec   float64  `json:"agent_execution_sec"`
-	VerifierSec         *float64 `json:"verifier_sec"`
+	EnvironmentSetupSec *float64 `json:"environment_setup_sec"`
+	AgentSetupSec       *float64 `json:"agent_setup_sec"`
+	AgentExecutionSec   *float64 `json:"agent_execution_sec"`
+	VerifierSec         *float64 `json:"verifier_sec"`X
 }
 
 type Timestamps struct {
@@ -393,8 +393,9 @@ type Environment interface {
 	// CopyFrom copies a file or directory from the environment to local path.
 	CopyFrom(ctx context.Context, src, dst string) error
 
-	// Exec executes a command in the environment and returns stdout, stderr, and exit code.
-	Exec(ctx context.Context, cmd string, opts ExecOptions) (*ExecResult, error)
+	// Exec executes a command in the environment, streaming stdout and stderr to the provided writers.
+	// Returns the exit code or error on failure.
+	Exec(ctx context.Context, cmd string, stdout, stderr io.Writer, opts ExecOptions) (int, error)
 
 	// Stop stops the environment but does not remove it.
 	Stop(ctx context.Context) error
@@ -412,12 +413,6 @@ type ExecOptions struct {
 	Env     map[string]string
 	Timeout time.Duration
 	WorkDir string
-}
-
-type ExecResult struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
 }
 
 // EnvironmentProvider is a factory for creating environments.
@@ -463,6 +458,8 @@ type CreateEnvironmentOptions struct {
 type TaskLoader interface {
 	// LoadTask loads a single task from a filesystem.
 	// The fsys should be rooted at the task directory.
+	// For local filesystem tasks, LoadTask attempts to resolve the git commit SHA
+	// from the repository (or sets TaskGitCommitID to nil if not in a git repo).
 	LoadTask(ctx context.Context, fsys fs.FS) (*Task, error)
 
 	// ValidateTask validates a task's structure and configuration.
@@ -513,18 +510,10 @@ type TrialExecutor interface {
 
 ```go
 // ResultCollector aggregates and persists trial results.
-// Designed to be run as a single goroutine consuming from a result channel.
 type ResultCollector interface {
-	// Run consumes results from the channel until it's closed.
-	// Writes each trial result to disk as it arrives.
-	Run(ctx context.Context, results <-chan *TrialResult) error
-
-	// GetJobResult returns the aggregated job result.
-	// Should only be called after Run completes.
-	GetJobResult() *JobResult
-
-	// Finalize writes the final job result to disk.
-	Finalize() error
+	// Collect consumes results from the channel, writes each to disk,
+	// and returns the aggregated JobResult when the channel closes.
+	Collect(ctx context.Context, results <-chan *TrialResult) (*JobResult, error)
 }
 ```
 
@@ -607,7 +596,11 @@ flowchart TB
         end
 
         subgraph Phase6["Phase 6: Teardown"]
-            StopContainer["Stop container"] --> Cleanup["Cleanup resources"]
+            StopContainer["Stop container"] --> CheckPolicy["Check preserve_env<br/>and trial result"]
+            CheckPolicy -->|always| Preserve["Preserve environment"]
+            CheckPolicy -->|never| Cleanup["Destroy resources"]
+            CheckPolicy -->|on_failure and success| Cleanup
+            CheckPolicy -->|on_failure and failure| Preserve
         end
 
         Phase1 --> Phase2
@@ -715,6 +708,11 @@ rollout/
 4. **Graceful cancellation**: SIGINT/SIGTERM triggers graceful shutdown—running trials complete their current phase, queued trials are marked as skipped.
 
 5. **Retry transient failures**: Infrastructure failures (network, provider API errors) are retried with exponential backoff per the retry configuration.
+
+6. **Conditional environment cleanup**: Environment teardown follows the `preserve_env` setting:
+   - `"never"`: Always destroy the environment after trial completion.
+   - `"always"`: Always preserve the environment for inspection.
+   - `"on_failure"`: Preserve only if the trial failed (non-zero reward or error), otherwise destroy to save resources.
 
 ## Concurrency Model
 
