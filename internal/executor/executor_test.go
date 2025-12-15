@@ -316,3 +316,112 @@ func TestCancellationStopsExecution(t *testing.T) {
 		}
 	})
 }
+
+
+func TestComputeVerifierTimeout(t *testing.T) {
+	tests := []struct {
+		name           string
+		taskTimeoutSec float64
+		multiplier     float64
+		overrideSec    *float64
+		maxSec         *float64
+		wantSec        float64
+	}{
+		{
+			name:           "basic with multiplier",
+			taskTimeoutSec: 100.0,
+			multiplier:     1.0,
+			wantSec:        100.0,
+		},
+		{
+			name:           "multiplier applied",
+			taskTimeoutSec: 100.0,
+			multiplier:     2.0,
+			wantSec:        200.0,
+		},
+		{
+			name:           "override takes precedence",
+			taskTimeoutSec: 100.0,
+			multiplier:     1.0,
+			overrideSec:    ptr(50.0),
+			wantSec:        50.0,
+		},
+		{
+			name:           "override with multiplier",
+			taskTimeoutSec: 100.0,
+			multiplier:     2.0,
+			overrideSec:    ptr(50.0),
+			wantSec:        100.0, // 50 * 2
+		},
+		{
+			name:           "max ceiling applied",
+			taskTimeoutSec: 100.0,
+			multiplier:     1.0,
+			maxSec:         ptr(60.0),
+			wantSec:        60.0,
+		},
+		{
+			name:           "max ceiling with multiplier",
+			taskTimeoutSec: 100.0,
+			multiplier:     2.0,
+			maxSec:         ptr(150.0), // max becomes 300 after multiplier
+			wantSec:        200.0,      // task timeout after multiplier (within ceiling)
+		},
+		{
+			name:           "max ceiling caps high timeout",
+			taskTimeoutSec: 200.0,
+			multiplier:     2.0,
+			maxSec:         ptr(150.0), // max becomes 300 after multiplier
+			wantSec:        300.0,      // capped at max*multiplier
+		},
+		{
+			name:           "override and max together - override wins under max",
+			taskTimeoutSec: 100.0,
+			multiplier:     1.0,
+			overrideSec:    ptr(50.0),
+			maxSec:         ptr(100.0),
+			wantSec:        50.0,
+		},
+		{
+			name:           "override exceeds max - max caps",
+			taskTimeoutSec: 100.0,
+			multiplier:     1.0,
+			overrideSec:    ptr(200.0),
+			maxSec:         ptr(100.0),
+			wantSec:        100.0, // capped by max
+		},
+		{
+			name:           "zero override ignored",
+			taskTimeoutSec: 100.0,
+			multiplier:     1.0,
+			overrideSec:    ptr(0.0),
+			wantSec:        100.0,
+		},
+		{
+			name:           "zero max ignored",
+			taskTimeoutSec: 100.0,
+			multiplier:     1.0,
+			maxSec:         ptr(0.0),
+			wantSec:        100.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := executor.NewTrialExecutor(
+				"/tmp/instruction.md",
+				tt.multiplier,
+				models.JobVerifierConfig{
+					OverrideTimeoutSec: tt.overrideSec,
+					MaxTimeoutSec:      tt.maxSec,
+				},
+			)
+
+			got := exec.ComputeVerifierTimeout(tt.taskTimeoutSec)
+			wantDuration := time.Duration(tt.wantSec) * time.Second
+			if got != wantDuration {
+				t.Errorf("got %v, want %v", got, wantDuration)
+			}
+		})
+	}
+}

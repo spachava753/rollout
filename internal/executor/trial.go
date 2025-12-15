@@ -20,13 +20,15 @@ import (
 type DefaultTrialExecutor struct {
 	InstructionPath   string
 	TimeoutMultiplier float64
+	VerifierConfig    models.JobVerifierConfig
 }
 
 // NewTrialExecutor creates a new trial executor.
-func NewTrialExecutor(instructionPath string, timeoutMult float64) *DefaultTrialExecutor {
+func NewTrialExecutor(instructionPath string, timeoutMult float64, verifierCfg models.JobVerifierConfig) *DefaultTrialExecutor {
 	return &DefaultTrialExecutor{
 		InstructionPath:   instructionPath,
 		TimeoutMultiplier: timeoutMult,
+		VerifierConfig:    verifierCfg,
 	}
 }
 
@@ -325,8 +327,33 @@ func (e *DefaultTrialExecutor) executeAgent(ctx context.Context, trial models.Tr
 	return nil
 }
 
+
+// ComputeVerifierTimeout calculates the effective timeout for the verifier,
+// applying override, max ceiling, and multiplier logic.
+func (e *DefaultTrialExecutor) ComputeVerifierTimeout(taskTimeoutSec float64) time.Duration {
+	timeoutSec := taskTimeoutSec
+
+	// Override takes precedence if set
+	if e.VerifierConfig.OverrideTimeoutSec != nil && *e.VerifierConfig.OverrideTimeoutSec > 0 {
+		timeoutSec = *e.VerifierConfig.OverrideTimeoutSec
+	}
+
+	// Apply multiplier
+	timeoutSec *= e.TimeoutMultiplier
+
+	// Apply max ceiling if set
+	if e.VerifierConfig.MaxTimeoutSec != nil && *e.VerifierConfig.MaxTimeoutSec > 0 {
+		maxSec := *e.VerifierConfig.MaxTimeoutSec * e.TimeoutMultiplier
+		if timeoutSec > maxSec {
+			timeoutSec = maxSec
+		}
+	}
+
+	return time.Duration(timeoutSec) * time.Second
+}
+
 func (e *DefaultTrialExecutor) runVerifier(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult) error {
-	timeout := time.Duration(trial.Task.Config.Verifier.TimeoutSec*e.TimeoutMultiplier) * time.Second
+	timeout := e.ComputeVerifierTimeout(trial.Task.Config.Verifier.TimeoutSec)
 	var stdout, stderr bytes.Buffer
 
 	exitCode, err := env.Exec(ctx, "bash /tests/test.sh", &stdout, &stderr, environment.ExecOptions{

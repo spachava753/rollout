@@ -26,7 +26,7 @@ Initial implementation complete. The framework can execute tasks using the Docke
 - Modal and Kubernetes environment providers
 - Retry logic for transient failures
 - `preserve_env` policy enforcement
-- Verifier timeout overrides from job config
+
 
 ## Development
 
