@@ -67,8 +67,11 @@ func (p *Provider) PullImage(ctx context.Context, imageRef string) error {
 
 // CreateEnvironment creates and starts a Docker container.
 func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.CreateEnvironmentOptions) (environment.Environment, error) {
-	// Generate container name
-	containerID := fmt.Sprintf("rollout-%d", time.Now().UnixNano())
+	// Use provided name or generate one
+	containerID := opts.Name
+	if containerID == "" {
+		containerID = fmt.Sprintf("rollout-%d", time.Now().UnixNano())
+	}
 
 	args := []string{
 		"run",

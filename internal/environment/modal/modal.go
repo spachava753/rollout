@@ -92,8 +92,11 @@ func (p *Provider) PullImage(ctx context.Context, imageRef string) error {
 
 // CreateEnvironment creates and starts a Modal sandbox.
 func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.CreateEnvironmentOptions) (environment.Environment, error) {
-	// Determine app name
-	appName := p.config.AppName
+	// Determine app name: prefer opts.Name, then config, then generate
+	appName := opts.Name
+	if appName == "" {
+		appName = p.config.AppName
+	}
 	if appName == "" {
 		appName = fmt.Sprintf("rollout-%d", time.Now().UnixNano())
 	}

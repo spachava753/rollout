@@ -195,8 +195,10 @@ func (e *DefaultTrialExecutor) setupEnvironment(ctx context.Context, trial model
 		return nil, fmt.Errorf("building image: %w", err)
 	}
 
-	// Create environment
+	// Create environment with meaningful name for debugging
+	envName := formatEnvironmentName(trial.Dataset, trial.Task.Name, trial.Agent.Name, trial.Attempt)
 	env, err := provider.CreateEnvironment(ctx, environment.CreateEnvironmentOptions{
+		Name:     envName,
 		ImageRef: imageRef,
 		CPUs:     trial.Task.Config.Env.CPUs,
 		Memory:   trial.Task.Config.Env.Memory,
@@ -410,4 +412,33 @@ func (e *DefaultTrialExecutor) runVerifier(ctx context.Context, trial models.Tri
 
 	result.Reward = &reward
 	return nil
+}
+
+
+// formatEnvironmentName creates a human-readable environment name from trial context.
+// Format: {dataset}-{task}-{agent}-{attempt}-{timestamp}
+// Names are sanitized to be valid across providers (lowercase, alphanumeric + hyphens).
+func formatEnvironmentName(dataset, task, agent string, attempt int) string {
+	ts := time.Now().Unix()
+	name := fmt.Sprintf("%s-%s-%s-%d-%d", dataset, task, agent, attempt, ts)
+	return sanitizeEnvName(name)
+}
+
+// sanitizeEnvName ensures the name is valid for container/app naming.
+// Converts to lowercase, replaces invalid chars with hyphens, removes consecutive hyphens.
+func sanitizeEnvName(name string) string {
+	name = strings.ToLower(name)
+	var result strings.Builder
+	prevHyphen := false
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			result.WriteRune(r)
+			prevHyphen = false
+		} else if !prevHyphen {
+			result.WriteRune('-')
+			prevHyphen = true
+		}
+	}
+	// Trim leading/trailing hyphens
+	return strings.Trim(result.String(), "-")
 }

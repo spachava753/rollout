@@ -63,6 +63,10 @@ type BuildImageOptions struct {
 
 // CreateEnvironmentOptions configures environment creation.
 type CreateEnvironmentOptions struct {
+	// Name is an optional human-readable name for the environment.
+	// If empty, the provider generates a unique name.
+	// Format suggestion: "{dataset}-{task}-{agent}-{attempt}-{timestamp}"
+	Name     string
 	ImageRef string
 	CPUs     string
 	Memory   string
