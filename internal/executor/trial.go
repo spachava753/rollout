@@ -66,6 +66,8 @@ func (e *DefaultTrialExecutor) Execute(ctx context.Context, trial models.Trial, 
 		return result, nil
 	}
 
+	// Phase 6: Teardown (deferred)
+	// TODO: respect preserve_env policy (always/never/on_failure)
 	defer func() {
 		if env != nil {
 			env.Destroy(context.Background())
