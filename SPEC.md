@@ -42,9 +42,9 @@ A task is a single instruction, container environment, and test script. Tasks ar
   [environment]
   build_timeout_sec = 600.0
   docker_image = "some-org/some-name:some-tag"
-  cpus = "1"
-  memory = "2G"
-  storage = "10G"
+  cpus = 1
+  memory_mb = 2048
+  storage_mb = 10240
   ```
 
   Configuration parameters are defined by the following JSON Schema:
@@ -110,18 +110,18 @@ A task is a single instruction, container environment, and test script. Tasks ar
             "description": "A pre-built Docker image to use for the environment. When set, this image is used instead of building from environment/Dockerfile. If the image is not present locally, Rollout pulls it from the registry before starting the container."
           },
           "cpus": {
-            "type": "string",
-            "default": "1",
+            "type": "integer",
+            "default": 1,
             "description": "Number of CPUs available to the environment."
           },
-          "memory": {
-            "type": "string",
-            "default": "2G",
-            "description": "Amount of RAM available to the environment."
+          "memory_mb": {
+            "type": "integer",
+            "default": 2048,
+            "description": "Amount of RAM available to the environment in MB."
           },
-          "storage": {
-            "type": "string",
-            "default": "10G",
+          "memory_mb": {
+            "type": "integer",
+            "default": 10240,
             "description": "Amount of storage available to the environment."
           }
         }
@@ -130,7 +130,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
   }
   ```
 
-  The `environment.(cpus|memory|storage)` values are interpreted as a [quantity](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/) expression, similar to quantities specified in Kubernetes. Rollout translates these values to the appropriate configuration format expected by each environment provider (e.g., Docker resource constraints, Kubernetes resource requests/limits, Modal sandbox specs).
+  The `cpus` field is an integer number of cores. The `memory_mb` and `storage_mb` fields are integers representing Megabytes (MB). Rollout translates these values to the appropriate configuration format expected by each environment provider.
 
 - **environment/**: The environment definition is placed in an `environment/` folder. **Rollout expects OS-like container images** with standard utilities available (bash, coreutils, etc.). Since tasks evaluate full-featured agents that may need to install dependencies, run build tools, or execute complex scripts, tasks typically build from base images like `ubuntu:24.04` or similar. Rollout assumes `bash` is available and uses it to execute agent install/execute scripts and the verifier. **Rollout does not require any specific file to exist in that directory**. Which file is required depends on the environment type being used for the evaluation. For example, to use docker, we check that an `environment/Dockerfile` is present. Different environment types could require other files to be present (e.g. an Apptainer environment could check for an `image.def` file). Most cloud sandbox providers only support `Dockerfile` defined environments and not docker compose.
 
@@ -593,8 +593,8 @@ environment:
     # network: "rollout-net"
     # runtime: "nvidia"
   override_cpus: 1 # if set, override task specific cpu config
-  override_memory: 2G # if set, override task specific memory config
-  override_storage: 30G # if set, override task specific storage config
+  override_memory_mb: 2048 # if set, override task specific memory config
+  override_storage_mb: 30720 # if set, override task specific storage config
 verifier:
   override_timeout_sec: 0 # if set, override task specific verifier timeout
   max_timeout_sec: 0 # if set, sets the ceiling of timeouts for verifiers

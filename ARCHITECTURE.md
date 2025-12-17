@@ -74,9 +74,10 @@ type AgentTaskConfig struct {
 type EnvironmentConfig struct {
 	BuildTimeoutSec float64 `toml:"build_timeout_sec"` // default: 600.0
 	DockerImage     *string `toml:"docker_image,omitempty"`
-	CPUs            string  `toml:"cpus"`    // default: "1"
-	Memory          string  `toml:"memory"`  // default: "2G"
-	Storage         string  `toml:"storage"` // default: "10G"
+	CPUs            int     `toml:"cpus"`    // default: 1
+	MemoryMB        int     `toml:"memory_mb"`  // default: 2048
+	StorageMB       int     `toml:"storage_mb"` // default: 10240
+    // Deprecated fields: Memory, Storage
 }
 ```
 
@@ -184,13 +185,13 @@ type RetryConfig struct {
 }
 
 type JobEnvironmentConfig struct {
-	Type            string         `yaml:"type" json:"type"` // "docker", "k8s", "modal", etc.
-	ForceBuild      bool           `yaml:"force_build" json:"force_build"`
-	PreserveEnv     PreservePolicy `yaml:"preserve_env" json:"preserve_env"` // default: "never"
-	ProviderConfig  map[string]any `yaml:"provider_config,omitempty" json:"provider_config,omitempty"`
-	OverrideCPUs    *string        `yaml:"override_cpus,omitempty" json:"override_cpus,omitempty"`
-	OverrideMemory  *string        `yaml:"override_memory,omitempty" json:"override_memory,omitempty"`
-	OverrideStorage *string        `yaml:"override_storage,omitempty" json:"override_storage,omitempty"`
+	Type              string         `yaml:"type" json:"type"` // "docker", "k8s", "modal", etc.
+	ForceBuild        bool           `yaml:"force_build" json:"force_build"`
+	PreserveEnv       PreservePolicy `yaml:"preserve_env" json:"preserve_env"` // default: "never"
+	ProviderConfig    map[string]any `yaml:"provider_config,omitempty" json:"provider_config,omitempty"`
+	OverrideCPUs      *int           `yaml:"override_cpus,omitempty" json:"override_cpus,omitempty"`
+	OverrideMemoryMB  *int           `yaml:"override_memory_mb,omitempty" json:"override_memory_mb,omitempty"`
+	OverrideStorageMB *int           `yaml:"override_storage_mb,omitempty" json:"override_storage_mb,omitempty"`
 }
 
 // PreservePolicy controls environment cleanup behavior.

@@ -127,9 +127,10 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	if cpuCount <= 0 {
 		cpuCount = 1
 	}
-	memoryMiB, err := parseMemory(opts.Memory)
-	if err != nil {
-		return nil, fmt.Errorf("parsing memory: %w", err)
+	// Memory is already passed as MB
+	memoryMiB := opts.MemoryMB
+	if memoryMiB <= 0 {
+		memoryMiB = 2048
 	}
 
 	// Build environment variables map including opts.Env
@@ -287,46 +288,6 @@ func parseCPUs(cpus string) (int, error) {
 		result = 1
 	}
 	return result, nil
-}
-
-// parseMemory converts a memory string (e.g., "2G", "512M") to MiB.
-func parseMemory(memory string) (int, error) {
-	if memory == "" {
-		return 2048, nil
-	}
-
-	memory = strings.TrimSpace(memory)
-	if memory == "" {
-		return 2048, nil
-	}
-
-	var value float64
-	var unit string
-
-	n, err := fmt.Sscanf(memory, "%f%s", &value, &unit)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("invalid memory value: %s", memory)
-	}
-
-	if n == 1 {
-		return int(value / (1024 * 1024)), nil
-	}
-
-	unit = strings.ToUpper(strings.TrimSpace(unit))
-	switch unit {
-	case "B":
-		return int(value / (1024 * 1024)), nil
-	case "K", "KB", "KI", "KIB":
-		return int(value / 1024), nil
-	case "M", "MB", "MI", "MIB":
-		return int(value), nil
-	case "G", "GB", "GI", "GIB":
-		return int(value * 1024), nil
-	case "T", "TB", "TI", "TIB":
-		return int(value * 1024 * 1024), nil
-	default:
-		return 0, fmt.Errorf("unknown memory unit: %s", unit)
-	}
 }
 
 // ModalEnvironment represents a running Modal sandbox.

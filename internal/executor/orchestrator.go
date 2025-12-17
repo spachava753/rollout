@@ -331,7 +331,7 @@ func (o *JobOrchestrator) aggregateResults(jobName string, results []*models.Tri
 
 // DefaultTrialExecutorFunc creates a default trial executor.
 func DefaultTrialExecutorFunc(cfg models.JobConfig) TrialExecutor {
-	return NewTrialExecutor(cfg.InstructionPath, cfg.TimeoutMultiplier, cfg.Verifier)
+	return NewTrialExecutor(cfg.InstructionPath, cfg.TimeoutMultiplier, cfg.Verifier, cfg.Environment)
 }
 
 // RunFromConfig loads a job config file and executes the job.

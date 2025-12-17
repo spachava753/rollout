@@ -84,8 +84,8 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	if opts.CPUs > 0 {
 		args = append(args, "--cpus", strconv.Itoa(opts.CPUs))
 	}
-	if opts.Memory != "" {
-		args = append(args, "--memory", opts.Memory)
+	if opts.MemoryMB > 0 {
+		args = append(args, "--memory", fmt.Sprintf("%dm", opts.MemoryMB))
 	}
 
 	// Add environment variables

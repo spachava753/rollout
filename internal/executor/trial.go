@@ -21,14 +21,16 @@ type DefaultTrialExecutor struct {
 	InstructionPath   string
 	TimeoutMultiplier float64
 	VerifierConfig    models.JobVerifierConfig
+	EnvOverrides      models.JobEnvironmentConfig
 }
 
 // NewTrialExecutor creates a new trial executor.
-func NewTrialExecutor(instructionPath string, timeoutMult float64, verifierCfg models.JobVerifierConfig) *DefaultTrialExecutor {
+func NewTrialExecutor(instructionPath string, timeoutMult float64, verifierCfg models.JobVerifierConfig, envOverrides models.JobEnvironmentConfig) *DefaultTrialExecutor {
 	return &DefaultTrialExecutor{
 		InstructionPath:   instructionPath,
 		TimeoutMultiplier: timeoutMult,
 		VerifierConfig:    verifierCfg,
+		EnvOverrides:      envOverrides,
 	}
 }
 
@@ -195,14 +197,32 @@ func (e *DefaultTrialExecutor) setupEnvironment(ctx context.Context, trial model
 		return nil, fmt.Errorf("building image: %w", err)
 	}
 
+	// Determine Memory and Storage
+	memoryMB := trial.Task.Config.Env.MemoryMB
+	if e.EnvOverrides.OverrideMemoryMB != nil {
+		memoryMB = *e.EnvOverrides.OverrideMemoryMB
+	}
+	
+	storageMB := trial.Task.Config.Env.StorageMB
+	if e.EnvOverrides.OverrideStorageMB != nil {
+		storageMB = *e.EnvOverrides.OverrideStorageMB
+	}
+	
+	// Determine CPUs
+	cpus := trial.Task.Config.Env.CPUs
+	if e.EnvOverrides.OverrideCPUs != nil {
+		cpus = *e.EnvOverrides.OverrideCPUs
+	}
+
 	// Create environment with meaningful name for debugging
 	envName := formatEnvironmentName(trial.Dataset, trial.Task.Name, trial.Agent.Name, trial.Attempt)
 	env, err := provider.CreateEnvironment(ctx, environment.CreateEnvironmentOptions{
-		Name:     envName,
-		ImageRef: imageRef,
-		CPUs:     trial.Task.Config.Env.CPUs,
-		Memory:   trial.Task.Config.Env.Memory,
-		Env:      trial.Agent.Env,
+		Name:      envName,
+		ImageRef:  imageRef,
+		CPUs:      cpus,
+		MemoryMB:  memoryMB,
+		StorageMB: storageMB,
+		Env:       trial.Agent.Env,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating environment: %w", err)

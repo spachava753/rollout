@@ -66,11 +66,11 @@ type CreateEnvironmentOptions struct {
 	// Name is an optional human-readable name for the environment.
 	// If empty, the provider generates a unique name.
 	// Format suggestion: "{dataset}-{task}-{agent}-{attempt}-{timestamp}"
-	Name     string
-	ImageRef string
-	CPUs     int
-	Memory   string
-	Storage  string
-	Env      map[string]string
-	Config   map[string]any
+	Name      string
+	ImageRef  string
+	CPUs      int
+	MemoryMB  int
+	StorageMB int
+	Env       map[string]string
+	Config    map[string]any
 }

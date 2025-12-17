@@ -54,9 +54,41 @@ memory = "4G"
 		t.Errorf("expected cpus 2, got %d", cfg.Env.CPUs)
 	}
 
-	if cfg.Env.Memory != "4G" {
-		t.Errorf("expected memory 4G, got %s", cfg.Env.Memory)
+	// Should convert memory="4G" to memory_mb=4096
+	if cfg.Env.MemoryMB != 4096 {
+		t.Errorf("expected memory_mb 4096, got %d", cfg.Env.MemoryMB)
 	}
+}
+
+func TestLoadTaskConfig_MemoryMB(t *testing.T) {
+	taskToml := `version = "1.0"
+[verifier]
+timeout_sec = 600.0
+[agent]
+timeout_sec = 600.0
+install_timeout_sec = 300.0
+[environment]
+cpus = 1
+memory_mb = 4096
+storage_mb = 8192
+`
+
+	fsys := fstest.MapFS{
+		"task.toml": &fstest.MapFile{Data: []byte(taskToml)},
+	}
+
+	cfg, err := config.LoadTaskConfig(fsys)
+	if err != nil {
+		t.Fatalf("LoadTaskConfig failed: %v", err)
+	}
+
+    if cfg.Env.MemoryMB != 4096 {
+        t.Errorf("expected memory_mb 4096, got %d", cfg.Env.MemoryMB)
+    }
+    
+    if cfg.Env.StorageMB != 8192 {
+        t.Errorf("expected storage_mb 8192, got %d", cfg.Env.StorageMB)
+    }
 }
 
 func TestLoadJobConfig(t *testing.T) {
@@ -70,6 +102,9 @@ environment:
   type: docker
   force_build: true
   preserve_env: on_failure
+  override_cpus: 4
+  override_memory_mb: 8192
+  override_storage_mb: 16384
 agents:
   - name: oracle
   - name: custom-agent
@@ -120,6 +155,19 @@ datasets:
 	if cfg.Environment.PreserveEnv != models.PreserveOnFailure {
 		t.Errorf("expected preserve_env on_failure, got %s", cfg.Environment.PreserveEnv)
 	}
+    
+    // Check overrides
+    if cfg.Environment.OverrideCPUs == nil || *cfg.Environment.OverrideCPUs != 4 {
+        t.Errorf("expected override_cpus 4, got %v", cfg.Environment.OverrideCPUs)
+    }
+    
+    if cfg.Environment.OverrideMemoryMB == nil || *cfg.Environment.OverrideMemoryMB != 8192 {
+        t.Errorf("expected override_memory_mb 8192, got %v", cfg.Environment.OverrideMemoryMB)
+    }
+    
+    if cfg.Environment.OverrideStorageMB == nil || *cfg.Environment.OverrideStorageMB != 16384 {
+        t.Errorf("expected override_storage_mb 16384, got %v", cfg.Environment.OverrideStorageMB)
+    }
 
 	if len(cfg.Agents) != 2 {
 		t.Errorf("expected 2 agents, got %d", len(cfg.Agents))

@@ -430,6 +430,7 @@ func TestComputeVerifierTimeout(t *testing.T) {
 					OverrideTimeoutSec: tt.overrideSec,
 					MaxTimeoutSec:      tt.maxSec,
 				},
+				models.JobEnvironmentConfig{}, // Added missing argument
 			)
 
 			got := exec.ComputeVerifierTimeout(tt.taskTimeoutSec)

@@ -36,13 +36,13 @@ type RetryConfig struct {
 }
 
 type JobEnvironmentConfig struct {
-	Type            string         `yaml:"type" json:"type"`
-	ForceBuild      bool           `yaml:"force_build" json:"force_build"`
-	PreserveEnv     PreservePolicy `yaml:"preserve_env" json:"preserve_env"`
-	ProviderConfig  map[string]any `yaml:"provider_config,omitempty" json:"provider_config,omitempty"`
-	OverrideCPUs    *string        `yaml:"override_cpus,omitempty" json:"override_cpus,omitempty"`
-	OverrideMemory  *string        `yaml:"override_memory,omitempty" json:"override_memory,omitempty"`
-	OverrideStorage *string        `yaml:"override_storage,omitempty" json:"override_storage,omitempty"`
+	Type              string         `yaml:"type" json:"type"`
+	ForceBuild        bool           `yaml:"force_build" json:"force_build"`
+	PreserveEnv       PreservePolicy `yaml:"preserve_env" json:"preserve_env"`
+	ProviderConfig    map[string]any `yaml:"provider_config,omitempty" json:"provider_config,omitempty"`
+	OverrideCPUs      *int           `yaml:"override_cpus,omitempty" json:"override_cpus,omitempty"`
+	OverrideMemoryMB  *int           `yaml:"override_memory_mb,omitempty" json:"override_memory_mb,omitempty"`
+	OverrideStorageMB *int           `yaml:"override_storage_mb,omitempty" json:"override_storage_mb,omitempty"`
 }
 
 type JobVerifierConfig struct {

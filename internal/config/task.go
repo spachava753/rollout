@@ -6,6 +6,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/spachava753/rollout/internal/models"
+	"github.com/spachava753/rollout/internal/util"
 )
 
 // DefaultTaskConfig returns a TaskConfig with default values.
@@ -22,8 +23,8 @@ func DefaultTaskConfig() models.TaskConfig {
 		Env: models.EnvironmentConfig{
 			BuildTimeoutSec: 600.0,
 			CPUs:            1,
-			Memory:          "2G",
-			Storage:         "10G",
+			MemoryMB:        2048,  // 2G
+			StorageMB:       10240, // 10G
 		},
 	}
 }
@@ -37,8 +38,27 @@ func LoadTaskConfig(fsys fs.FS) (models.TaskConfig, error) {
 		return cfg, fmt.Errorf("reading task.toml: %w", err)
 	}
 
-	if _, err := toml.Decode(string(data), &cfg); err != nil {
+	md, err := toml.Decode(string(data), &cfg)
+	if err != nil {
 		return cfg, fmt.Errorf("parsing task.toml: %w", err)
+	}
+
+	// Handle legacy 'memory' field if 'memory_mb' is not explicitly set
+	if !md.IsDefined("environment", "memory_mb") && md.IsDefined("environment", "memory") {
+		mb, err := util.ParseMemory(cfg.Env.Memory)
+		if err != nil {
+			return cfg, fmt.Errorf("parsing memory %q: %w", cfg.Env.Memory, err)
+		}
+		cfg.Env.MemoryMB = mb
+	}
+
+	// Handle legacy 'storage' field if 'storage_mb' is not explicitly set
+	if !md.IsDefined("environment", "storage_mb") && md.IsDefined("environment", "storage") {
+		mb, err := util.ParseMemory(cfg.Env.Storage)
+		if err != nil {
+			return cfg, fmt.Errorf("parsing storage %q: %w", cfg.Env.Storage, err)
+		}
+		cfg.Env.StorageMB = mb
 	}
 
 	return cfg, nil
