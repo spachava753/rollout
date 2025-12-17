@@ -219,26 +219,40 @@ func (e *DefaultTrialExecutor) Execute(ctx context.Context, trial models.Trial, 
 }
 
 func (e *DefaultTrialExecutor) setupEnvironment(ctx context.Context, trial models.Trial, provider environment.Provider, logger *slog.Logger) (environment.Environment, error) {
-	// Build image
-	envDir := filepath.Join(trial.Task.Path, "environment")
-	tag := fmt.Sprintf("rollout-%s-%s:%d", trial.Task.Name, trial.Agent.Name, time.Now().UnixNano())
+	var imageRef string
+	var err error
 
-	timeout := time.Duration(trial.Task.Config.Env.BuildTimeoutSec*e.TimeoutMultiplier) * time.Second
-	logger.Debug("building image",
-		"context_dir", envDir,
-		"tag", tag,
-		"timeout", timeout)
-	
-	imageRef, err := provider.BuildImage(ctx, environment.BuildImageOptions{
-		ContextDir: envDir,
-		Tag:        tag,
-		Timeout:    timeout,
-	})
-	if err != nil {
-		logger.Error("image build failed", "error", err)
-		return nil, fmt.Errorf("building image: %w", err)
+	// Check if a pre-built docker image is specified and force_build is not set
+	if trial.Task.Config.Env.DockerImage != nil && !e.EnvOverrides.ForceBuild {
+		imageRef = *trial.Task.Config.Env.DockerImage
+		logger.Debug("using pre-built image", "image", imageRef)
+		if err := provider.PullImage(ctx, imageRef); err != nil {
+			logger.Error("image pull failed", "error", err)
+			return nil, fmt.Errorf("pulling image: %w", err)
+		}
+		logger.Debug("image ready", "image_ref", imageRef)
+	} else {
+		// Build image from Dockerfile
+		envDir := filepath.Join(trial.Task.Path, "environment")
+		tag := fmt.Sprintf("rollout-%s-%s:%d", trial.Task.Name, trial.Agent.Name, time.Now().UnixNano())
+
+		timeout := time.Duration(trial.Task.Config.Env.BuildTimeoutSec*e.TimeoutMultiplier) * time.Second
+		logger.Debug("building image",
+			"context_dir", envDir,
+			"tag", tag,
+			"timeout", timeout)
+
+		imageRef, err = provider.BuildImage(ctx, environment.BuildImageOptions{
+			ContextDir: envDir,
+			Tag:        tag,
+			Timeout:    timeout,
+		})
+		if err != nil {
+			logger.Error("image build failed", "error", err)
+			return nil, fmt.Errorf("building image: %w", err)
+		}
+		logger.Debug("image built successfully", "image_ref", imageRef)
 	}
-	logger.Debug("image built successfully", "image_ref", imageRef)
 
 	// Determine Memory and Storage
 	memoryMB := trial.Task.Config.Env.MemoryMB
