@@ -28,6 +28,25 @@ Initial implementation complete. The framework can execute tasks using the Docke
 - `preserve_env` policy enforcement
 
 
+## Registry-Based Dataset Loading
+
+The registry package (`internal/registry/`) is implemented with the following components:
+
+- **types.go**: `RegistryTask`, `RegistryDataset`, and `cloneKey` types
+- **loader.go**: `LoadFromPath()`, `LoadFromURL()`, `FindDataset()`
+- **resolver.go**: `Resolver` that clones repos (deduplicated by git_url+commit) and loads tasks
+
+The `dataset.Loader` has a new `LoadFromRegistry()` method.
+
+### Remaining Work
+
+1. **Orchestrator Integration**: Update `internal/executor/orchestrator.go` to call `LoadFromRegistry()` when `DatasetRef.Registry` is set
+2. **Validation** (optional): Add validation in config loading to ensure `DatasetRef` has either `Path` OR `Registry` set
+
+### Clone Directory
+
+Cloned repositories are stored in `/tmp/rollout-registry-<timestamp>/` and persist after job completion for debugging. Users should clean up manually if needed.
+
 ## Development
 
 ### Running Tests
