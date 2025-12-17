@@ -71,7 +71,7 @@ func (e *DefaultTrialExecutor) Execute(ctx context.Context, trial models.Trial, 
 				"duration", fmt.Sprintf("%.2fs", result.Durations.TotalSec))
 		} else {
 			logger.Info("trial completed",
-				"reward", result.Reward,
+				"reward", *result.Reward,
 				"duration", fmt.Sprintf("%.2fs", result.Durations.TotalSec))
 		}
 	}()
@@ -522,6 +522,10 @@ func (e *DefaultTrialExecutor) runVerifier(ctx context.Context, trial models.Tri
 // formatEnvironmentName creates a human-readable environment name from trial context.
 // Format: {dataset}-{task}-{agent}-{attempt}-{timestamp}
 // Names are sanitized to be valid across providers (lowercase, alphanumeric + hyphens).
+// maxAppNameLength is the maximum length for Modal app names.
+// Modal rejects names longer than 64 characters.
+const maxAppNameLength = 64
+
 func formatEnvironmentName(dataset, task, agent string, attempt int) string {
 	ts := time.Now().Unix()
 	name := fmt.Sprintf("%s-%s-%s-%d-%d", dataset, task, agent, attempt, ts)
@@ -529,7 +533,8 @@ func formatEnvironmentName(dataset, task, agent string, attempt int) string {
 }
 
 // sanitizeEnvName ensures the name is valid for container/app naming.
-// Converts to lowercase, replaces invalid chars with hyphens, removes consecutive hyphens.
+// Converts to lowercase, replaces invalid chars with hyphens, removes consecutive hyphens,
+// and truncates to maxAppNameLength.
 func sanitizeEnvName(name string) string {
 	name = strings.ToLower(name)
 	var result strings.Builder
@@ -544,5 +549,12 @@ func sanitizeEnvName(name string) string {
 		}
 	}
 	// Trim leading/trailing hyphens
-	return strings.Trim(result.String(), "-")
+	sanitized := strings.Trim(result.String(), "-")
+	
+	// Truncate to max length, avoiding trailing hyphen
+	if len(sanitized) > maxAppNameLength {
+		sanitized = sanitized[:maxAppNameLength]
+		sanitized = strings.TrimRight(sanitized, "-")
+	}
+	return sanitized
 }
