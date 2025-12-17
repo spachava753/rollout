@@ -42,6 +42,18 @@ func LoadJobConfig(path string) (models.JobConfig, error) {
 		return cfg, fmt.Errorf("parsing job config: %w", err)
 	}
 
+	// Validate dataset refs
+	for i, ref := range cfg.Datasets {
+		hasPath := ref.Path != nil && *ref.Path != ""
+		hasRegistry := ref.Registry != nil
+		if !hasPath && !hasRegistry {
+			return cfg, fmt.Errorf("dataset[%d]: must specify either 'path' or 'registry'", i)
+		}
+		if hasPath && hasRegistry {
+			return cfg, fmt.Errorf("dataset[%d]: cannot specify both 'path' and 'registry'", i)
+		}
+	}
+
 	// Apply defaults for missing values
 	if cfg.JobsDir == "" {
 		cfg.JobsDir = "jobs"

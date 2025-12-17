@@ -22,11 +22,9 @@ Initial implementation complete. The framework can execute tasks using the Docke
 
 ### Not Yet Implemented
 
-- Registry-based dataset loading (remote git repos)
-- Modal and Kubernetes environment providers
+- Kubernetes environment provider
 - Retry logic for transient failures
 - `preserve_env` policy enforcement
-
 
 ## Registry-Based Dataset Loading
 
@@ -37,11 +35,6 @@ The registry package (`internal/registry/`) is implemented with the following co
 - **resolver.go**: `Resolver` that clones repos (deduplicated by git_url+commit) and loads tasks
 
 The `dataset.Loader` has a new `LoadFromRegistry()` method.
-
-### Remaining Work
-
-1. **Orchestrator Integration**: Update `internal/executor/orchestrator.go` to call `LoadFromRegistry()` when `DatasetRef.Registry` is set
-2. **Validation** (optional): Add validation in config loading to ensure `DatasetRef` has either `Path` OR `Registry` set
 
 ### Clone Directory
 

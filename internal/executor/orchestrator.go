@@ -71,6 +71,12 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 				return nil, fmt.Errorf("loading dataset from path %s: %w", *ref.Path, err)
 			}
 			datasets = append(datasets, *ds)
+		} else if ref.Registry != nil {
+			ds, err := loader.LoadFromRegistry(ctx, *ref.Registry, ref.Name, ref.Version)
+			if err != nil {
+				return nil, fmt.Errorf("loading dataset %s from registry: %w", ref.Name, err)
+			}
+			datasets = append(datasets, *ds)
 		}
 	}
 
