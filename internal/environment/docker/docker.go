@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"os"
 	"os/exec"
@@ -42,6 +43,11 @@ func (p *Provider) BuildImage(ctx context.Context, opts environment.BuildImageOp
 		defer cancel()
 	}
 
+	slog.Debug("executing docker build",
+		"tag", opts.Tag,
+		"context", opts.ContextDir,
+		"no_cache", opts.NoCache)
+
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -50,11 +56,14 @@ func (p *Provider) BuildImage(ctx context.Context, opts environment.BuildImageOp
 		return "", fmt.Errorf("building docker image: %w", err)
 	}
 
+	slog.Debug("docker build completed", "tag", opts.Tag)
 	return opts.Tag, nil
 }
 
 // PullImage pulls a pre-built image from a registry.
 func (p *Provider) PullImage(ctx context.Context, imageRef string) error {
+	slog.Debug("pulling docker image", "image", imageRef)
+	
 	cmd := exec.CommandContext(ctx, "docker", "pull", imageRef)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -63,6 +72,7 @@ func (p *Provider) PullImage(ctx context.Context, imageRef string) error {
 		return fmt.Errorf("pulling docker image: %w", err)
 	}
 
+	slog.Debug("docker image pulled", "image", imageRef)
 	return nil
 }
 
@@ -97,6 +107,12 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	// Keep container running with sleep infinity
 	args = append(args, "sleep", "infinity")
 
+	slog.Debug("creating docker container",
+		"name", containerID,
+		"image", opts.ImageRef,
+		"cpus", opts.CPUs,
+		"memory_mb", opts.MemoryMB)
+
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -105,6 +121,8 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("creating docker container: %w: %s", err, stderr.String())
 	}
+
+	slog.Debug("docker container created", "container_id", containerID)
 
 	return &DockerEnvironment{
 		containerID: containerID,
@@ -133,6 +151,11 @@ func (e *DockerEnvironment) CopyTo(ctx context.Context, src, dst string) error {
 		}
 	}
 
+	slog.Debug("copying to container",
+		"container_id", e.containerID,
+		"src", src,
+		"dst", dst)
+
 	cmd := exec.CommandContext(ctx, "docker", "cp", src, fmt.Sprintf("%s:%s", e.containerID, dst))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -149,6 +172,11 @@ func (e *DockerEnvironment) CopyFrom(ctx context.Context, src, dst string) error
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return fmt.Errorf("creating local directory: %w", err)
 	}
+
+	slog.Debug("copying from container",
+		"container_id", e.containerID,
+		"src", src,
+		"dst", dst)
 
 	cmd := exec.CommandContext(ctx, "docker", "cp", fmt.Sprintf("%s:%s", e.containerID, src), dst)
 	var stderr bytes.Buffer
@@ -182,6 +210,16 @@ func (e *DockerEnvironment) Exec(ctx context.Context, cmd string, stdout, stderr
 
 	args = append(args, e.containerID, "bash", "-c", cmd)
 
+	// Truncate command for logging (avoid huge scripts in logs)
+	cmdPreview := cmd
+	if len(cmdPreview) > 100 {
+		cmdPreview = cmdPreview[:100] + "..."
+	}
+	slog.Debug("executing command in container",
+		"container_id", e.containerID,
+		"command", cmdPreview,
+		"timeout", opts.Timeout)
+
 	execCmd := exec.CommandContext(ctx, "docker", args...)
 	execCmd.Stdout = stdout
 	execCmd.Stderr = stderr
@@ -190,10 +228,14 @@ func (e *DockerEnvironment) Exec(ctx context.Context, cmd string, stdout, stderr
 	if err != nil {
 		// Try to extract exit code
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			slog.Debug("command exited with non-zero code",
+				"container_id", e.containerID,
+				"exit_code", exitErr.ExitCode())
 			return exitErr.ExitCode(), nil
 		}
 		// Check for context timeout
 		if ctx.Err() == context.DeadlineExceeded {
+			slog.Debug("command timed out", "container_id", e.containerID)
 			return -1, fmt.Errorf("command timed out")
 		}
 		return -1, fmt.Errorf("executing command: %w", err)
@@ -204,6 +246,8 @@ func (e *DockerEnvironment) Exec(ctx context.Context, cmd string, stdout, stderr
 
 // Stop stops the container but does not remove it.
 func (e *DockerEnvironment) Stop(ctx context.Context) error {
+	slog.Debug("stopping docker container", "container_id", e.containerID)
+	
 	cmd := exec.CommandContext(ctx, "docker", "stop", e.containerID)
 	if err := cmd.Run(); err != nil {
 		// Ignore error if container already stopped
@@ -216,6 +260,8 @@ func (e *DockerEnvironment) Stop(ctx context.Context) error {
 
 // Destroy removes the container and cleans up resources.
 func (e *DockerEnvironment) Destroy(ctx context.Context) error {
+	slog.Debug("destroying docker container", "container_id", e.containerID)
+	
 	// Force remove the container
 	cmd := exec.CommandContext(ctx, "docker", "rm", "-f", e.containerID)
 	if err := cmd.Run(); err != nil {

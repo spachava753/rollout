@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,9 +23,17 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// Log when interrupt is received
+	go func() {
+		<-ctx.Done()
+		if ctx.Err() == context.Canceled {
+			slog.Info("interrupt received, shutting down gracefully...")
+		}
+	}()
+
 	result, err := executor.RunFromConfig(ctx, configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		slog.Error("job failed", "error", err)
 		os.Exit(1)
 	}
 

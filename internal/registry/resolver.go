@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ type Resolver struct {
 // The baseDir will be created under os.TempDir() with a timestamp prefix.
 func NewResolver() (*Resolver, error) {
 	baseDir := filepath.Join(os.TempDir(), fmt.Sprintf("rollout-registry-%d", time.Now().Unix()))
+	slog.Debug("creating registry resolver base directory", "path", baseDir)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating base directory: %w", err)
 	}
@@ -52,6 +54,11 @@ func (r *Resolver) Resolve(ctx context.Context, dataset *RegistryDataset) ([]mod
 		key := cloneKey{GitURL: t.GitURL, GitCommitID: t.GitCommitID}
 		groups[key] = append(groups[key], t)
 	}
+
+	slog.Debug("resolving registry dataset",
+		"dataset", dataset.Name,
+		"unique_repos", len(groups),
+		"total_tasks", len(dataset.Tasks))
 
 	// Clone each unique repository (parallel)
 	clones := make(map[cloneKey]string)
@@ -86,6 +93,8 @@ func (r *Resolver) Resolve(ctx context.Context, dataset *RegistryDataset) ([]mod
 			taskPath = filepath.Join(clonePath, regTask.Path)
 		}
 
+		slog.Debug("loading task from clone", "task", regTask.Name, "path", taskPath)
+
 		t, err := r.taskLoader.LoadTask(ctx, taskPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading task %s: %w", regTask.Name, err)
@@ -104,6 +113,7 @@ func (r *Resolver) Resolve(ctx context.Context, dataset *RegistryDataset) ([]mod
 		tasks = append(tasks, *t)
 	}
 
+	slog.Debug("resolved all tasks", "count", len(tasks))
 	return tasks, nil
 }
 
@@ -116,11 +126,13 @@ func (r *Resolver) cloneRepo(ctx context.Context, key cloneKey) (string, error) 
 
 	// Check if already cloned (idempotent)
 	if _, err := os.Stat(clonePath); err == nil {
+		slog.Debug("repository already cloned", "url", key.GitURL, "path", clonePath)
 		return clonePath, nil
 	}
 
 	if key.GitCommitID == "" {
 		// Shallow clone for HEAD
+		slog.Debug("cloning repository (shallow)", "url", key.GitURL, "dest", clonePath)
 		cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", key.GitURL, clonePath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -129,6 +141,7 @@ func (r *Resolver) cloneRepo(ctx context.Context, key cloneKey) (string, error) 
 		}
 	} else {
 		// Full clone then checkout specific commit
+		slog.Debug("cloning repository (full)", "url", key.GitURL, "commit", key.GitCommitID, "dest", clonePath)
 		cmd := exec.CommandContext(ctx, "git", "clone", key.GitURL, clonePath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -136,6 +149,7 @@ func (r *Resolver) cloneRepo(ctx context.Context, key cloneKey) (string, error) 
 			return "", fmt.Errorf("git clone: %w", err)
 		}
 
+		slog.Debug("checking out commit", "commit", key.GitCommitID)
 		cmd = exec.CommandContext(ctx, "git", "checkout", key.GitCommitID)
 		cmd.Dir = clonePath
 		cmd.Stdout = os.Stdout
@@ -145,6 +159,7 @@ func (r *Resolver) cloneRepo(ctx context.Context, key cloneKey) (string, error) 
 		}
 	}
 
+	slog.Debug("repository cloned successfully", "url", key.GitURL, "path", clonePath)
 	return clonePath, nil
 }
 

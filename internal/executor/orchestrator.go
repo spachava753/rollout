@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,7 @@ func NewJobOrchestrator(cfg models.JobConfig, executorFactory NewTrialExecutorFu
 	switch cfg.Environment.Type {
 	case "docker":
 		provider = docker.NewProvider()
+		slog.Debug("initialized docker environment provider")
 	case "modal":
 		modalCfg := modal.ParseProviderConfig(cfg.Environment.ProviderConfig)
 		var err error
@@ -45,6 +48,7 @@ func NewJobOrchestrator(cfg models.JobConfig, executorFactory NewTrialExecutorFu
 		if err != nil {
 			return nil, fmt.Errorf("creating modal provider: %w", err)
 		}
+		slog.Debug("initialized modal environment provider")
 	default:
 		return nil, fmt.Errorf("unsupported environment type: %s", cfg.Environment.Type)
 	}
@@ -61,21 +65,26 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 	startTime := time.Now()
 
 	// Load datasets
+	slog.Info("loading datasets", "count", len(o.cfg.Datasets))
 	loader := dataset.NewLoader()
 	var datasets []models.Dataset
 
 	for _, ref := range o.cfg.Datasets {
 		if ref.Path != nil {
+			slog.Debug("loading dataset from path", "path", *ref.Path)
 			ds, err := loader.LoadFromPath(ctx, *ref.Path)
 			if err != nil {
 				return nil, fmt.Errorf("loading dataset from path %s: %w", *ref.Path, err)
 			}
+			slog.Info("loaded dataset", "name", ds.Name, "tasks", len(ds.Tasks))
 			datasets = append(datasets, *ds)
 		} else if ref.Registry != nil {
+			slog.Debug("loading dataset from registry", "name", ref.Name, "version", ref.Version)
 			ds, err := loader.LoadFromRegistry(ctx, *ref.Registry, ref.Name, ref.Version)
 			if err != nil {
 				return nil, fmt.Errorf("loading dataset %s from registry: %w", ref.Name, err)
 			}
+			slog.Info("loaded dataset", "name", ds.Name, "version", ds.Version, "tasks", len(ds.Tasks))
 			datasets = append(datasets, *ds)
 		}
 	}
@@ -102,6 +111,11 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 		}
 	}
 
+	slog.Info("generated trials",
+		"total", len(trials),
+		"agents", len(o.cfg.Agents),
+		"attempts_per_task", o.cfg.NAttempts)
+
 	// Create job output directory
 	jobName := time.Now().Format("2006-01-02__15-04-05")
 	if o.cfg.Name != nil {
@@ -113,6 +127,7 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 		return nil, fmt.Errorf("job directory already exists: %s (will not overwrite existing results)", jobDir)
 	}
 
+	slog.Debug("creating job output directory", "path", jobDir)
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating job directory: %w", err)
 	}
@@ -142,6 +157,10 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 		nWorkers = len(trials)
 	}
 
+	slog.Info("starting trial execution",
+		"workers", nWorkers,
+		"total_trials", len(trials))
+
 	results, skipped := o.runConcurrent(ctx, trials, nWorkers)
 
 	// Aggregate results
@@ -149,11 +168,19 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 	jobResult.SkippedTrials = skipped
 	if skipped > 0 {
 		jobResult.Cancelled = true
+		slog.Info("job cancelled", "completed", len(results), "skipped", skipped)
 	}
 
 	// Save job result
+	slog.Debug("writing job result", "path", filepath.Join(jobDir, "result.json"))
 	jobResultJSON, _ := json.MarshalIndent(jobResult, "", "  ")
 	os.WriteFile(filepath.Join(jobDir, "result.json"), jobResultJSON, 0644)
+
+	slog.Info("job completed",
+		"duration", time.Since(startTime).Round(time.Second),
+		"completed", jobResult.CompletedTrials,
+		"failed", jobResult.FailedTrials,
+		"pass_rate", fmt.Sprintf("%.2f%%", jobResult.PassRate*100))
 
 	return jobResult, nil
 }
@@ -176,6 +203,10 @@ func (o *JobOrchestrator) runConcurrent(ctx context.Context, trials []models.Tri
 
 				result, err := executor.Execute(ctx, trial, o.provider)
 				if err != nil {
+					slog.Error("trial execution error",
+						"task", trial.Task.Name,
+						"agent", trial.Agent.Name,
+						"error", err)
 					result = &models.TrialResult{
 						TaskName:    trial.Task.Name,
 						DatasetName: trial.Dataset,
@@ -207,6 +238,7 @@ func (o *JobOrchestrator) runConcurrent(ctx context.Context, trials []models.Tri
 		for _, trial := range trials {
 			select {
 			case <-ctx.Done():
+				slog.Debug("stopping trial feeder due to context cancellation")
 				return
 			case trialChan <- trial:
 				fed++
@@ -336,10 +368,14 @@ func DefaultTrialExecutorFunc(cfg models.JobConfig) TrialExecutor {
 
 // RunFromConfig loads a job config file and executes the job.
 func RunFromConfig(ctx context.Context, configPath string) (*models.JobResult, error) {
+	slog.Info("loading job config", "path", configPath)
 	cfg, err := config.LoadJobConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading job config: %w", err)
 	}
+
+	// Configure logging based on job config
+	configureLogging(cfg.LogLevel)
 
 	orchestrator, err := NewJobOrchestrator(cfg, DefaultTrialExecutorFunc)
 	if err != nil {
@@ -347,4 +383,27 @@ func RunFromConfig(ctx context.Context, configPath string) (*models.JobResult, e
 	}
 
 	return orchestrator.Run(ctx)
+}
+
+// configureLogging sets up slog based on the log level from job config.
+func configureLogging(level string) {
+	var logLevel slog.Level
+	switch strings.ToLower(level) {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "warn", "warning":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+	})
+	slog.SetDefault(slog.New(handler))
+	slog.Debug("logging configured", "level", level)
 }

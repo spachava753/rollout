@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +58,7 @@ type Provider struct {
 
 // NewProvider creates a new Modal provider.
 func NewProvider(config ProviderConfig) (*Provider, error) {
+	slog.Debug("initializing modal client")
 	client, err := modal.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("creating modal client: %w", err)
@@ -80,6 +82,7 @@ func (p *Provider) BuildImage(ctx context.Context, opts environment.BuildImageOp
 	if _, err := os.Stat(dockerfilePath); err != nil {
 		return "", fmt.Errorf("Dockerfile not found at %s: %w", dockerfilePath, err)
 	}
+	slog.Debug("modal build deferred - using context directory", "context", opts.ContextDir)
 	// Return context directory as the reference - we'll build in CreateEnvironment
 	return opts.ContextDir, nil
 }
@@ -87,6 +90,7 @@ func (p *Provider) BuildImage(ctx context.Context, opts environment.BuildImageOp
 // PullImage pulls a pre-built image from a registry.
 // For Modal, this is a no-op since Modal handles image pulling internally.
 func (p *Provider) PullImage(ctx context.Context, imageRef string) error {
+	slog.Debug("modal pull is no-op - handled internally", "image", imageRef)
 	return nil
 }
 
@@ -101,6 +105,8 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 		appName = fmt.Sprintf("rollout-%d", time.Now().UnixNano())
 	}
 
+	slog.Debug("creating modal app", "name", appName)
+	
 	// Get or create the Modal app
 	app, err := p.client.Apps.FromName(ctx, appName, &modal.AppFromNameParams{
 		CreateIfMissing: true,
@@ -113,12 +119,14 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	var image *modal.Image
 	if isDockerContextPath(opts.ImageRef) {
 		// ImageRef is a path to a directory with a Dockerfile
+		slog.Debug("building modal image from dockerfile", "context", opts.ImageRef)
 		image, err = p.buildImageFromDockerfile(ctx, app, opts.ImageRef)
 		if err != nil {
 			return nil, fmt.Errorf("building image from dockerfile: %w", err)
 		}
 	} else {
 		// ImageRef is a registry image reference
+		slog.Debug("using registry image for modal", "image", opts.ImageRef)
 		image = p.client.Images.FromRegistry(opts.ImageRef, nil)
 	}
 
@@ -149,11 +157,19 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 		Regions:   p.config.Regions,
 	}
 
+	slog.Debug("creating modal sandbox",
+		"app", appName,
+		"cpus", cpuCount,
+		"memory_mib", memoryMiB,
+		"regions", p.config.Regions)
+
 	// Create the sandbox
 	sandbox, err := p.client.Sandboxes.Create(ctx, app, image, createParams)
 	if err != nil {
 		return nil, fmt.Errorf("creating modal sandbox: %w", err)
 	}
+
+	slog.Debug("modal sandbox created", "sandbox_id", sandbox.SandboxID)
 
 	return &ModalEnvironment{
 		client:    p.client,
@@ -180,6 +196,10 @@ func (p *Provider) buildImageFromDockerfile(ctx context.Context, app *modal.App,
 		return nil, fmt.Errorf("parsing Dockerfile: %w", err)
 	}
 
+	slog.Debug("parsed dockerfile",
+		"base_image", baseImage,
+		"commands", len(commands))
+
 	// Start with the base image
 	image := p.client.Images.FromRegistry(baseImage, nil)
 
@@ -189,6 +209,7 @@ func (p *Provider) buildImageFromDockerfile(ctx context.Context, app *modal.App,
 	}
 
 	// Build the image eagerly so we catch build errors early
+	slog.Debug("building modal image")
 	builtImage, err := image.Build(ctx, app)
 	if err != nil {
 		return nil, fmt.Errorf("building image: %w", err)
@@ -321,6 +342,12 @@ func (e *ModalEnvironment) CopyTo(ctx context.Context, src, dst string) error {
 		}
 	}
 
+	slog.Debug("copying to modal sandbox",
+		"sandbox_id", e.sandbox.SandboxID,
+		"src", src,
+		"dst", dst,
+		"is_dir", info.IsDir())
+
 	if info.IsDir() {
 		return e.copyDirTo(ctx, src, dst)
 	}
@@ -377,6 +404,11 @@ func (e *ModalEnvironment) copyDirTo(ctx context.Context, src, dst string) error
 
 // CopyFrom copies a file or directory from the sandbox to local path.
 func (e *ModalEnvironment) CopyFrom(ctx context.Context, src, dst string) error {
+	slog.Debug("copying from modal sandbox",
+		"sandbox_id", e.sandbox.SandboxID,
+		"src", src,
+		"dst", dst)
+
 	// Check if source is a directory by trying to list it
 	exitCode, _ := e.execSimple(ctx, fmt.Sprintf("test -d %q", src))
 	if exitCode == 0 {
@@ -475,6 +507,16 @@ func (e *ModalEnvironment) Exec(ctx context.Context, cmd string, stdout, stderr 
 		execParams.Workdir = opts.WorkDir
 	}
 
+	// Truncate command for logging
+	cmdPreview := cmd
+	if len(cmdPreview) > 100 {
+		cmdPreview = cmdPreview[:100] + "..."
+	}
+	slog.Debug("executing command in modal sandbox",
+		"sandbox_id", e.sandbox.SandboxID,
+		"command", cmdPreview,
+		"timeout", opts.Timeout)
+
 	process, err := e.sandbox.Exec(ctx, []string{"bash", "-c", cmd}, execParams)
 	if err != nil {
 		return -1, fmt.Errorf("executing command: %w", err)
@@ -510,16 +552,25 @@ func (e *ModalEnvironment) Exec(ctx context.Context, cmd string, stdout, stderr 
 		return -1, fmt.Errorf("waiting for process: %w", err)
 	}
 
+	if exitCode != 0 {
+		slog.Debug("command exited with non-zero code",
+			"sandbox_id", e.sandbox.SandboxID,
+			"exit_code", exitCode)
+	}
+
 	return exitCode, nil
 }
 
 // Stop stops the sandbox but does not remove it.
 func (e *ModalEnvironment) Stop(ctx context.Context) error {
+	slog.Debug("stopping modal sandbox", "sandbox_id", e.sandbox.SandboxID)
 	return e.sandbox.Terminate(ctx)
 }
 
 // Destroy removes the sandbox and cleans up all resources.
 func (e *ModalEnvironment) Destroy(ctx context.Context) error {
+	slog.Debug("destroying modal sandbox", "sandbox_id", e.sandbox.SandboxID, "app", e.appName)
+	
 	// Terminate the sandbox first
 	if err := e.sandbox.Terminate(ctx); err != nil {
 		if !strings.Contains(err.Error(), "already terminated") &&
@@ -534,6 +585,7 @@ func (e *ModalEnvironment) Destroy(ctx context.Context) error {
 		return fmt.Errorf("stopping app: %w", err)
 	}
 
+	slog.Debug("modal sandbox destroyed", "sandbox_id", e.sandbox.SandboxID)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package dataset
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -31,6 +32,8 @@ func (l *Loader) LoadFromPath(ctx context.Context, datasetPath string) (*models.
 		return nil, fmt.Errorf("getting absolute path: %w", err)
 	}
 
+	slog.Debug("loading dataset from path", "path", absPath)
+
 	entries, err := os.ReadDir(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading dataset directory: %w", err)
@@ -43,6 +46,8 @@ func (l *Loader) LoadFromPath(ctx context.Context, datasetPath string) (*models.
 		}
 
 		taskPath := filepath.Join(absPath, entry.Name())
+		slog.Debug("loading task", "name", entry.Name(), "path", taskPath)
+		
 		t, err := l.taskLoader.LoadTask(ctx, taskPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading task %s: %w", entry.Name(), err)
@@ -60,6 +65,8 @@ func (l *Loader) LoadFromPath(ctx context.Context, datasetPath string) (*models.
 	}
 
 	name := filepath.Base(absPath)
+	slog.Debug("dataset loaded", "name", name, "tasks", len(tasks))
+	
 	return &models.Dataset{
 		Name:  name,
 		Tasks: tasks,
@@ -70,12 +77,13 @@ func (l *Loader) LoadFromPath(ctx context.Context, datasetPath string) (*models.
 func (l *Loader) LoadFromRegistry(ctx context.Context, ref models.RegistryRef, name, version string) (*models.Dataset, error) {
 	// Initialize resolver lazily
 	if l.resolver == nil {
+		slog.Debug("initializing registry resolver")
 		r, err := registry.NewResolver()
 		if err != nil {
 			return nil, fmt.Errorf("creating resolver: %w", err)
 		}
 		l.resolver = r
-		fmt.Printf("Registry clones will be stored in: %s\n", r.BaseDir())
+		slog.Info("registry clones will be stored in", "path", r.BaseDir())
 	}
 
 	// Load registry from path or URL
@@ -83,11 +91,13 @@ func (l *Loader) LoadFromRegistry(ctx context.Context, ref models.RegistryRef, n
 	var err error
 
 	if ref.Path != nil && *ref.Path != "" {
+		slog.Debug("loading registry from path", "path", *ref.Path)
 		datasets, err = registry.LoadFromPath(*ref.Path)
 		if err != nil {
 			return nil, fmt.Errorf("loading registry from path: %w", err)
 		}
 	} else if ref.URL != nil && *ref.URL != "" {
+		slog.Debug("loading registry from URL", "url", *ref.URL)
 		datasets, err = registry.LoadFromURL(ctx, *ref.URL)
 		if err != nil {
 			return nil, fmt.Errorf("loading registry from URL: %w", err)
@@ -97,12 +107,14 @@ func (l *Loader) LoadFromRegistry(ctx context.Context, ref models.RegistryRef, n
 	}
 
 	// Find the requested dataset
+	slog.Debug("finding dataset in registry", "name", name, "version", version)
 	regDataset, err := registry.FindDataset(datasets, name, version)
 	if err != nil {
 		return nil, err
 	}
 
 	// Resolve tasks (clone repos, load tasks)
+	slog.Debug("resolving tasks from registry", "dataset", name, "task_count", len(regDataset.Tasks))
 	tasks, err := l.resolver.Resolve(ctx, regDataset)
 	if err != nil {
 		return nil, fmt.Errorf("resolving tasks: %w", err)
