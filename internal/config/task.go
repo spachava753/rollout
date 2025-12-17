@@ -21,7 +21,7 @@ func DefaultTaskConfig() models.TaskConfig {
 		},
 		Env: models.EnvironmentConfig{
 			BuildTimeoutSec: 600.0,
-			CPUs:            "1",
+			CPUs:            1,
 			Memory:          "2G",
 			Storage:         "10G",
 		},

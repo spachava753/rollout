@@ -68,7 +68,7 @@ type CreateEnvironmentOptions struct {
 	// Format suggestion: "{dataset}-{task}-{agent}-{attempt}-{timestamp}"
 	Name     string
 	ImageRef string
-	CPUs     string
+	CPUs     int
 	Memory   string
 	Storage  string
 	Env      map[string]string

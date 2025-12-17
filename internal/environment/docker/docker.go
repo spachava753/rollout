@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,8 +81,8 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	}
 
 	// Add resource constraints
-	if opts.CPUs != "" {
-		args = append(args, "--cpus", opts.CPUs)
+	if opts.CPUs > 0 {
+		args = append(args, "--cpus", strconv.Itoa(opts.CPUs))
 	}
 	if opts.Memory != "" {
 		args = append(args, "--memory", opts.Memory)

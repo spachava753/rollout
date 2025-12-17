@@ -24,7 +24,7 @@ type AgentTaskConfig struct {
 type EnvironmentConfig struct {
 	BuildTimeoutSec float64 `toml:"build_timeout_sec"` // default: 600.0
 	DockerImage     *string `toml:"docker_image,omitempty"`
-	CPUs            string  `toml:"cpus"`    // default: "1"
+	CPUs            int     `toml:"cpus"`    // default: 1
 	Memory          string  `toml:"memory"`  // default: "2G"
 	Storage         string  `toml:"storage"` // default: "10G"
 }

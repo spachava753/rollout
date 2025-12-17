@@ -25,7 +25,7 @@ timeout_sec = 60.0
 install_timeout_sec = 30.0
 
 [environment]
-cpus = "2"
+cpus = 2
 memory = "4G"
 `
 
@@ -50,8 +50,8 @@ memory = "4G"
 		t.Errorf("expected agent timeout 60, got %f", cfg.Agent.TimeoutSec)
 	}
 
-	if cfg.Env.CPUs != "2" {
-		t.Errorf("expected cpus 2, got %s", cfg.Env.CPUs)
+	if cfg.Env.CPUs != 2 {
+		t.Errorf("expected cpus 2, got %d", cfg.Env.CPUs)
 	}
 
 	if cfg.Env.Memory != "4G" {

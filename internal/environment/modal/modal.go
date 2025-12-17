@@ -123,9 +123,9 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	}
 
 	// Parse resource specs
-	cpuCount, err := parseCPUs(opts.CPUs)
-	if err != nil {
-		return nil, fmt.Errorf("parsing CPUs: %w", err)
+	cpuCount := opts.CPUs
+	if cpuCount <= 0 {
+		cpuCount = 1
 	}
 	memoryMiB, err := parseMemory(opts.Memory)
 	if err != nil {
