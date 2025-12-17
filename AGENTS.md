@@ -76,3 +76,10 @@ go build -o rollout ./cmd/rollout
 - Use `internal/` for all non-public packages
 - Error types defined in `internal/models/errors.go`
 - Config defaults in `internal/config/*.go`
+
+
+## Known Limitations
+
+### Modal Provider
+
+The Modal provider does not support `COPY` or `ADD` instructions in Dockerfiles that reference local files. This is because the `modal-go` SDK builds images remotely and does not support uploading a local build context. Tasks must use self-contained images or pull artifacts from public URLs.

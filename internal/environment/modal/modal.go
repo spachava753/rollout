@@ -77,6 +77,9 @@ func (p *Provider) Name() string {
 // BuildImage builds a container image from the given context directory.
 // For Modal, we return the context directory path as the "image reference".
 // The actual image building happens lazily when the sandbox is created.
+// LIMITATION: This provider does not support COPY/ADD instructions in Dockerfiles 
+// that reference local files, as the modal-go SDK does not support build contexts.
+// Images must be self-contained or use public URLs.
 func (p *Provider) BuildImage(ctx context.Context, opts environment.BuildImageOptions) (string, error) {
 	dockerfilePath := filepath.Join(opts.ContextDir, "Dockerfile")
 	if _, err := os.Stat(dockerfilePath); err != nil {
