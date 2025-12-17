@@ -2,6 +2,7 @@ package modal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -56,8 +57,16 @@ type Provider struct {
 	config ProviderConfig
 }
 
+// MinImageBuilderVersion is the minimum required Modal image builder version.
+// WORKDIR and other Dockerfile instructions require version 2025.06 or later.
+const MinImageBuilderVersion = "2025.06"
+
 // NewProvider creates a new Modal provider.
 func NewProvider(config ProviderConfig) (*Provider, error) {
+	if err := checkImageBuilderVersion(); err != nil {
+		return nil, err
+	}
+
 	slog.Debug("initializing modal client")
 	client, err := modal.NewClient()
 	if err != nil {
@@ -67,6 +76,63 @@ func NewProvider(config ProviderConfig) (*Provider, error) {
 		client: client,
 		config: config,
 	}, nil
+}
+
+// ConfigReader reads Modal configuration.
+type ConfigReader interface {
+	ReadConfig() ([]byte, error)
+}
+
+// cliConfigReader reads config by executing the modal CLI.
+type cliConfigReader struct{}
+
+func (c *cliConfigReader) ReadConfig() ([]byte, error) {
+	modalPath, err := exec.LookPath("modal")
+	if err != nil {
+		return nil, fmt.Errorf("modal CLI not found: %w", err)
+	}
+	cmd := exec.Command(modalPath, "config", "show")
+	return cmd.Output()
+}
+
+// defaultConfigReader is the default ConfigReader used in production.
+var defaultConfigReader ConfigReader = &cliConfigReader{}
+
+// checkImageBuilderVersion verifies that the Modal image builder version is sufficient.
+func checkImageBuilderVersion() error {
+	return checkImageBuilderVersionWith(defaultConfigReader)
+}
+
+// checkImageBuilderVersionWith verifies the version using the provided ConfigReader.
+func checkImageBuilderVersionWith(reader ConfigReader) error {
+	output, err := reader.ReadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to get modal config: %w", err)
+	}
+
+	var config struct {
+		ImageBuilderVersion *string `json:"image_builder_version"`
+	}
+	if err := json.Unmarshal(output, &config); err != nil {
+		return fmt.Errorf("failed to parse modal config: %w", err)
+	}
+
+	if config.ImageBuilderVersion == nil || *config.ImageBuilderVersion == "" {
+		return fmt.Errorf("modal image_builder_version is not set; "+
+			"WORKDIR support requires version %s or later. "+
+			"Run: modal config set image_builder_version %s",
+			MinImageBuilderVersion, MinImageBuilderVersion)
+	}
+
+	if *config.ImageBuilderVersion < MinImageBuilderVersion {
+		return fmt.Errorf("modal image_builder_version %q is too old; "+
+			"WORKDIR support requires version %s or later. "+
+			"Run: modal config set image_builder_version %s",
+			*config.ImageBuilderVersion, MinImageBuilderVersion, MinImageBuilderVersion)
+	}
+
+	slog.Debug("modal image builder version check passed", "version", *config.ImageBuilderVersion)
+	return nil
 }
 
 // Name returns the provider name.
