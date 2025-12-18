@@ -24,3 +24,15 @@
 !AGENTS.md
 
 !*/
+
+# Keep repo spec and architecture tracked
+!SPEC.md
+!ARCHITECTURE.md
+
+# Test dataset for development
+!test-dataset/
+!test-dataset/**
+
+# Test configuration files
+!testdata/
+!testdata/**

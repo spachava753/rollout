@@ -1,0 +1,16 @@
+name: test-registry-harbor
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 1
+timeout_multiplier: 1.0
+instruction_path: /tmp/instruction.md
+environment:
+  type: docker
+  preserve_env: never
+agents:
+  - name: oracle
+datasets:
+  - registry:
+      url: https://raw.githubusercontent.com/laude-institute/harbor/refs/heads/main/registry.json
+    name: hello-world
+    version: head
