@@ -32,6 +32,8 @@ type TrialResult struct {
 	Error           *TrialError `json:"error"`
 	Durations       Durations   `json:"durations"`
 	Timestamps      Timestamps  `json:"timestamps"`
+	VerifierStdout  string      `json:"verifier_stdout,omitempty"`
+	VerifierStderr  string      `json:"verifier_stderr,omitempty"`
 }
 
 type TrialError struct {

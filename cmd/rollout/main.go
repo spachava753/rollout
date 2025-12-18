@@ -19,16 +19,22 @@ func main() {
 
 	configPath := os.Args[1]
 
-	// Setup context with signal handling
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	// Setup context with manual signal handling
+	ctx, cancel := context.WithCancel(context.Background())
 
-	// Log when interrupt is received
+	// Listen for interrupt signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	defer func() {
+		signal.Stop(sigChan)
+		cancel()
+	}()
+
 	go func() {
-		<-ctx.Done()
-		if ctx.Err() == context.Canceled {
-			slog.Info("interrupt received, shutting down gracefully...")
-		}
+		sig := <-sigChan
+		slog.Info("interrupt received, shutting down gracefully...", "signal", sig)
+		cancel()
 	}()
 
 	result, err := executor.RunFromConfig(ctx, configPath)

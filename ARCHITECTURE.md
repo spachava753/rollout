@@ -264,6 +264,8 @@ type TrialResult struct {
 	Error           *TrialError  `json:"error"`
 	Durations       Durations    `json:"durations"`
 	Timestamps      Timestamps   `json:"timestamps"`
+	VerifierStdout  string       `json:"verifier_stdout,omitempty"`
+	VerifierStderr  string       `json:"verifier_stderr,omitempty"`
 }
 
 type TrialError struct {
@@ -573,7 +575,7 @@ flowchart TB
     subgraph TrialExecutor["Trial Executor"]
         subgraph Phase1["Phase 1: Environment Setup"]
             BuildPull["Build/Pull Image"] --> StartContainer["Start Container"]
-            StartContainer --> CopyFiles["Copy Files<br/>instruction, tests/"]
+            StartContainer --> CopyFiles["Copy Files<br/>instruction.md"]
         end
 
         subgraph Phase2["Phase 2: Agent Install"]
@@ -587,7 +589,8 @@ flowchart TB
         end
 
         subgraph Phase4["Phase 4: Verification"]
-            ExecTest["Execute test.sh"] --> CaptureTest["Capture stdout/stderr"]
+            CopyTests["Copy tests/"] --> ExecTest["Execute test.sh"]
+            ExecTest --> CaptureTest["Capture stdout/stderr"]
             CaptureTest --> ReadReward["Read reward file"]
         end
 

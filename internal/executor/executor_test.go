@@ -1,4 +1,4 @@
-package executor_test
+package executor
 
 import (
 	"context"
@@ -13,7 +13,6 @@ import (
 
 	"github.com/spachava753/rollout/internal/config"
 	"github.com/spachava753/rollout/internal/environment"
-	"github.com/spachava753/rollout/internal/executor"
 	"github.com/spachava753/rollout/internal/models"
 )
 
@@ -92,7 +91,7 @@ func (m *mockTrialExecutor) Execute(ctx context.Context, trial models.Trial, pro
 	}, nil
 }
 
-func mockExecutorFunc(cfg models.JobConfig) executor.TrialExecutor {
+func mockExecutorFunc(cfg models.JobConfig) TrialExecutor {
 	return &mockTrialExecutor{}
 }
 
@@ -122,8 +121,8 @@ func (m *slowMockTrialExecutor) Execute(ctx context.Context, trial models.Trial,
 	}, nil
 }
 
-func slowMockExecutorFunc(delay time.Duration, counter *int32) executor.NewTrialExecutorFunc {
-	return func(cfg models.JobConfig) executor.TrialExecutor {
+func slowMockExecutorFunc(delay time.Duration, counter *int32) NewTrialExecutorFunc {
+	return func(cfg models.JobConfig) TrialExecutor {
 		return &slowMockTrialExecutor{delay: delay, execCount: counter}
 	}
 }
@@ -139,7 +138,7 @@ func TestOracleAgentHelloWorld(t *testing.T) {
 	cfg.JobsDir = getJobsDir(t)
 	cfg.Name = ptr("test-oracle-hello-world")
 
-	orchestrator, err := executor.NewJobOrchestrator(cfg, executor.DefaultTrialExecutorFunc)
+	orchestrator, err := NewJobOrchestrator(cfg, DefaultTrialExecutorFunc)
 	if err != nil {
 		t.Fatalf("creating orchestrator: %v", err)
 	}
@@ -173,7 +172,7 @@ func TestOracleAgentConcurrent(t *testing.T) {
 	cfg.JobsDir = getJobsDir(t)
 	cfg.Name = ptr("test-oracle-concurrent")
 
-	orchestrator, err := executor.NewJobOrchestrator(cfg, executor.DefaultTrialExecutorFunc)
+	orchestrator, err := NewJobOrchestrator(cfg, DefaultTrialExecutorFunc)
 	if err != nil {
 		t.Fatalf("creating orchestrator: %v", err)
 	}
@@ -215,7 +214,7 @@ func TestJobDirectoryOverwriteProtection(t *testing.T) {
 	cfg.Name = ptr("test-overwrite-protection")
 
 	// First run succeeds
-	orchestrator, err := executor.NewJobOrchestrator(cfg, mockExecutorFunc)
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
 	if err != nil {
 		t.Fatalf("creating orchestrator: %v", err)
 	}
@@ -224,7 +223,7 @@ func TestJobDirectoryOverwriteProtection(t *testing.T) {
 	}
 
 	// Second run with same name fails
-	orchestrator2, _ := executor.NewJobOrchestrator(cfg, mockExecutorFunc)
+	orchestrator2, _ := NewJobOrchestrator(cfg, mockExecutorFunc)
 	_, err = orchestrator2.Run(t.Context())
 	if err == nil {
 		t.Fatal("expected error on second run")
@@ -242,7 +241,7 @@ func TestOrchestratorResultAggregation(t *testing.T) {
 	cfg.Name = ptr("test-aggregation")
 
 	synctest.Test(t, func(t *testing.T) {
-		orchestrator, err := executor.NewJobOrchestrator(cfg, mockExecutorFunc)
+		orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
 		if err != nil {
 			t.Fatalf("creating orchestrator: %v", err)
 		}
@@ -307,7 +306,7 @@ func TestCancellationStopsExecution(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 
 		var execCount int32
-		orchestrator, err := executor.NewJobOrchestrator(cfg, slowMockExecutorFunc(1*time.Second, &execCount))
+		orchestrator, err := NewJobOrchestrator(cfg, slowMockExecutorFunc(1*time.Second, &execCount))
 		if err != nil {
 			t.Fatalf("creating orchestrator: %v", err)
 		}
@@ -423,7 +422,7 @@ func TestComputeVerifierTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			exec := executor.NewTrialExecutor(
+			exec := NewTrialExecutor(
 				"/tmp/instruction.md",
 				tt.multiplier,
 				models.JobVerifierConfig{
@@ -433,7 +432,7 @@ func TestComputeVerifierTimeout(t *testing.T) {
 				models.JobEnvironmentConfig{}, // Added missing argument
 			)
 
-			got := exec.ComputeVerifierTimeout(tt.taskTimeoutSec)
+			got := exec.computeVerifierTimeout(tt.taskTimeoutSec)
 			wantDuration := time.Duration(tt.wantSec) * time.Second
 			if got != wantDuration {
 				t.Errorf("got %v, want %v", got, wantDuration)
@@ -457,7 +456,7 @@ func TestModalOracleAgentHelloWorld(t *testing.T) {
 	cfg.Name = ptr("test-modal-oracle-hello-world")
 	cfg.Environment.Type = "modal"
 
-	orchestrator, err := executor.NewJobOrchestrator(cfg, executor.DefaultTrialExecutorFunc)
+	orchestrator, err := NewJobOrchestrator(cfg, DefaultTrialExecutorFunc)
 	if err != nil {
 		t.Fatalf("creating orchestrator: %v", err)
 	}
@@ -498,7 +497,7 @@ func TestModalAppCleanup(t *testing.T) {
 	cfg.Environment.Type = "modal"
 	cfg.Environment.PreserveEnv = models.PreserveNever
 
-	orchestrator, err := executor.NewJobOrchestrator(cfg, executor.DefaultTrialExecutorFunc)
+	orchestrator, err := NewJobOrchestrator(cfg, DefaultTrialExecutorFunc)
 	if err != nil {
 		t.Fatalf("creating orchestrator: %v", err)
 	}

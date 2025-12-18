@@ -146,21 +146,10 @@ func (e *DefaultTrialExecutor) Execute(ctx context.Context, trial models.Trial, 
 		return result, nil
 	}
 
-	// Copy tests/ directory
-	logger.Debug("copying tests directory to container", "dest", "/tests")
-	testsDir := filepath.Join(trial.Task.Path, "tests")
-	if err := env.CopyTo(ctx, testsDir, "/tests"); err != nil {
-		result.Error = &models.TrialError{
-			Type:    models.ErrEnvironmentStartFailed,
-			Message: fmt.Sprintf("copying tests: %s", err),
-		}
-		return result, nil
-	}
-
 	// Create /logs directories
 	logger.Debug("creating log directories in container")
 	var createLogsDirs bytes.Buffer
-	_, err = env.Exec(ctx, "mkdir -p /logs/verifier /logs/agent", &createLogsDirs, &createLogsDirs, environment.ExecOptions{})
+	_, err = env.Exec(ctx, "mkdir -p /logs/agent", &createLogsDirs, &createLogsDirs, environment.ExecOptions{})
 	if err != nil {
 		result.Error = &models.TrialError{
 			Type:    models.ErrEnvironmentStartFailed,
@@ -195,6 +184,17 @@ func (e *DefaultTrialExecutor) Execute(ctx context.Context, trial models.Trial, 
 	}
 	logger.Debug("agent execution completed", "duration", fmt.Sprintf("%.2fs", execDur))
 
+	// Copy tests/ directory (after agent execution, before verification)
+	logger.Debug("copying tests directory to container", "dest", "/tests")
+	testsDir := filepath.Join(trial.Task.Path, "tests")
+	if err := env.CopyTo(ctx, testsDir, "/tests"); err != nil {
+		result.Error = &models.TrialError{
+			Type:    models.ErrVerifierFailed,
+			Message: fmt.Sprintf("copying tests: %s", err),
+		}
+		return result, nil
+	}
+
 	// Phase 4: Verification
 	logger.Debug("phase 4: running verifier")
 	now := time.Now()
@@ -212,6 +212,12 @@ func (e *DefaultTrialExecutor) Execute(ctx context.Context, trial models.Trial, 
 		os.MkdirAll(logsDir, 0755)
 		logger.Debug("copying logs from container", "src", "/logs", "dest", logsDir)
 		env.CopyFrom(ctx, "/logs/.", logsDir)
+
+		// Write verifier stdout/stderr directly to output dir
+		verifierLogsDir := filepath.Join(logsDir, "verifier")
+		os.MkdirAll(verifierLogsDir, 0755)
+		os.WriteFile(filepath.Join(verifierLogsDir, "stdout.txt"), []byte(result.VerifierStdout), 0644)
+		os.WriteFile(filepath.Join(verifierLogsDir, "stderr.txt"), []byte(result.VerifierStderr), 0644)
 	}
 
 	result.Cost = env.Cost()
@@ -426,9 +432,9 @@ func (e *DefaultTrialExecutor) executeAgent(ctx context.Context, trial models.Tr
 }
 
 
-// ComputeVerifierTimeout calculates the effective timeout for the verifier,
+// computeVerifierTimeout calculates the effective timeout for the verifier,
 // applying override, max ceiling, and multiplier logic.
-func (e *DefaultTrialExecutor) ComputeVerifierTimeout(taskTimeoutSec float64) time.Duration {
+func (e *DefaultTrialExecutor) computeVerifierTimeout(taskTimeoutSec float64) time.Duration {
 	timeoutSec := taskTimeoutSec
 
 	// Override takes precedence if set
@@ -451,7 +457,7 @@ func (e *DefaultTrialExecutor) ComputeVerifierTimeout(taskTimeoutSec float64) ti
 }
 
 func (e *DefaultTrialExecutor) runVerifier(ctx context.Context, trial models.Trial, env environment.Environment, result *models.TrialResult, logger *slog.Logger) error {
-	timeout := e.ComputeVerifierTimeout(trial.Task.Config.Verifier.TimeoutSec)
+	timeout := e.computeVerifierTimeout(trial.Task.Config.Verifier.TimeoutSec)
 	logger.Debug("executing verifier", "timeout", timeout)
 	var stdout, stderr bytes.Buffer
 
@@ -459,9 +465,9 @@ func (e *DefaultTrialExecutor) runVerifier(ctx context.Context, trial models.Tri
 		Timeout: timeout,
 	})
 
-	// Save verifier logs to container's /logs/verifier
-	env.Exec(ctx, fmt.Sprintf("echo %q > /logs/verifier/stdout.txt", stdout.String()), nil, nil, environment.ExecOptions{})
-	env.Exec(ctx, fmt.Sprintf("echo %q > /logs/verifier/stderr.txt", stderr.String()), nil, nil, environment.ExecOptions{})
+	// Store verifier output directly in result
+	result.VerifierStdout = stdout.String()
+	result.VerifierStderr = stderr.String()
 
 	if err != nil {
 		if strings.Contains(err.Error(), "timed out") {

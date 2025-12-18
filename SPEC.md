@@ -138,7 +138,7 @@ A task is a single instruction, container environment, and test script. Tasks ar
 
   | Path              | Description                                                                                                |
   | ----------------- | ---------------------------------------------------------------------------------------------------------- |
-  | `/logs/verifier/` | Contains the reward file and other verifier logs.                                                          |
+  | `/logs/verifier/` | Contains the reward file produced by the verifier.                                                         |
   | `/logs/agent/`    | A directory agents can use to store logs from their runs.                                                  |
   | `/oracle/`        | The solution folder is copied here by the Oracle agent at runtime and executed from the working directory. |
   | `/tests/`         | The tests folder is copied here by the Rollout harness at runtime and executed from the working directory. |
@@ -646,7 +646,7 @@ Running a job produces a structured output directory containing all trial result
 | `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/command/stdout.txt`       | Stdout from agent execution                                                                                            |
 | `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/`                    | Copied from the container's `/logs` directory                                                                          |
 | `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/agent/`              | Agent-produced logs (from `/logs/agent/` in container)                                                                 |
-| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/`           | Verifier logs and results (from `/logs/verifier/` in container)                                                        |
+| `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/`           | Verifier logs and results                                                                                              |
 | `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/reward.txt` | Reward file produced by tests                                                                                          |
 | `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/stderr.txt` | Stderr from test execution                                                                                             |
 | `jobs/<job-name>/<agent-name>/<dataset-name>/<task-name>__<n>/logs/verifier/stdout.txt` | Stdout from test execution                                                                                             |
