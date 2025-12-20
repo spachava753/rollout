@@ -143,7 +143,7 @@ func (p *Provider) Name() string {
 // BuildImage builds a container image from the given context directory.
 // For Modal, we return the context directory path as the "image reference".
 // The actual image building happens lazily when the sandbox is created.
-// LIMITATION: This provider does not support COPY/ADD instructions in Dockerfiles 
+// LIMITATION: This provider does not support COPY/ADD instructions in Dockerfiles
 // that reference local files, as the modal-go SDK does not support build contexts.
 // Images must be self-contained or use public URLs.
 func (p *Provider) BuildImage(ctx context.Context, opts environment.BuildImageOptions) (string, error) {
@@ -175,7 +175,7 @@ func (p *Provider) CreateEnvironment(ctx context.Context, opts environment.Creat
 	}
 
 	slog.Debug("creating modal app", "name", appName)
-	
+
 	// Get or create the Modal app
 	app, err := p.client.Apps.FromName(ctx, appName, &modal.AppFromNameParams{
 		CreateIfMissing: true,
@@ -334,11 +334,14 @@ func parseDockerfile(content string) (baseImage string, commands []string, err e
 			continue
 		}
 
-		// Parse Dockerfile instructions that Modal supports
+		// Check for unsupported instructions
 		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "COPY ") || strings.HasPrefix(upper, "ADD ") {
+			return "", nil, fmt.Errorf("COPY and ADD instructions are not supported in Modal environment Dockerfiles")
+		}
+
+		// Parse Dockerfile instructions that Modal supports
 		if strings.HasPrefix(upper, "RUN ") ||
-			strings.HasPrefix(upper, "COPY ") ||
-			strings.HasPrefix(upper, "ADD ") ||
 			strings.HasPrefix(upper, "WORKDIR ") ||
 			strings.HasPrefix(upper, "ENV ") ||
 			strings.HasPrefix(upper, "USER ") ||
@@ -639,7 +642,7 @@ func (e *ModalEnvironment) Stop(ctx context.Context) error {
 // Destroy removes the sandbox and cleans up all resources.
 func (e *ModalEnvironment) Destroy(ctx context.Context) error {
 	slog.Debug("destroying modal sandbox", "sandbox_id", e.sandbox.SandboxID, "app", e.appName)
-	
+
 	// Terminate the sandbox first
 	if err := e.sandbox.Terminate(ctx); err != nil {
 		if !strings.Contains(err.Error(), "already terminated") &&
