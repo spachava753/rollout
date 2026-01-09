@@ -15,6 +15,7 @@ import (
 	"github.com/spachava753/rollout/internal/dataset"
 	"github.com/spachava753/rollout/internal/environment"
 	"github.com/spachava753/rollout/internal/environment/docker"
+	"github.com/spachava753/rollout/internal/environment/apple"
 	"github.com/spachava753/rollout/internal/environment/modal"
 	"github.com/spachava753/rollout/internal/models"
 )
@@ -41,6 +42,14 @@ func NewJobOrchestrator(cfg models.JobConfig, executorFactory NewTrialExecutorFu
 	case "docker":
 		provider = docker.NewProvider()
 		slog.Debug("initialized docker environment provider")
+	case "apple":
+		appleCfg := apple.ParseProviderConfig(cfg.Environment.ProviderConfig)
+		var err error
+		provider, err = apple.NewProvider(appleCfg)
+		if err != nil {
+			return nil, fmt.Errorf("creating apple provider: %w", err)
+		}
+		slog.Debug("initialized apple environment provider")
 	case "modal":
 		modalCfg := modal.ParseProviderConfig(cfg.Environment.ProviderConfig)
 		var err error

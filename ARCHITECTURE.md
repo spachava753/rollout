@@ -27,7 +27,7 @@ flowchart TB
     end
 
     subgraph Providers["Execution Components"]
-        EnvProvider["Environment Provider<br/>(Docker/K8s/...)"]
+        EnvProvider["Environment Provider<br/>(Docker/Apple Container/K8s/...)"]
         AgentExec["Agent Executor"]
         Verifier["Verifier Executor"]
     end
@@ -678,6 +678,8 @@ rollout/
 │   │   └── registry.go       # RegistryClient implementation
 │   ├── environment/
 │   │   ├── provider.go       # EnvironmentProvider interface
+│   │   ├── apple/
+│   │   │   └── apple.go      # Apple Container provider (macOS VM-based, uses tar piping for file transfer)
 │   │   ├── docker/
 │   │   │   └── docker.go     # Docker provider (local containers)
 │   │   ├── modal/
