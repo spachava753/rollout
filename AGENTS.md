@@ -40,6 +40,36 @@ The `dataset.Loader` has a new `LoadFromRegistry()` method.
 
 Cloned repositories are stored in `/tmp/rollout-registry-<timestamp>/` and persist after job completion for debugging. Users should clean up manually if needed.
 
+## Apple Container Environment
+
+The framework supports Apple's Container project as an alternative to Docker on macOS.
+
+### Configuration
+
+```yaml
+environment:
+  type: apple
+  provider_config:
+    runtime_user: "1000"   # optional: override auto-detected UID
+    runtime_group: "1000"  # optional: override auto-detected GID
+```
+
+### Requirements
+
+- **macOS only**: Apple Container is a macOS-native containerization platform
+- **Apple Container CLI**: Install via `brew install container` or from https://github.com/apple/container-tools
+
+### When to Use
+
+- **Apple Container**: Best for macOS users with Apple Silicon, provides VM-level isolation with fast boot times
+- **Docker**: Cross-platform compatibility, established tooling ecosystem
+
+### Implementation Notes
+
+- File transfer uses tar piping (Apple Container lacks `cp` equivalent)
+- Runtime UID/GID auto-detected from container but can be overridden
+- Uses `--cpus` flag (same as Docker)
+
 ## Development
 
 ### Running Tests

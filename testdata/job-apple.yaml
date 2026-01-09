@@ -1,0 +1,16 @@
+name: test-hello-world
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 1
+timeout_multiplier: 1.0
+instruction_path: /tmp/instruction.md
+environment:
+  type: apple
+  # provider_config:
+  #   runtime_user: "1000"   # optional: override auto-detected UID
+  #   runtime_group: "1000"  # optional: override auto-detected GID
+  preserve_env: never
+agents:
+  - name: oracle
+datasets:
+  - path: ./test-dataset
