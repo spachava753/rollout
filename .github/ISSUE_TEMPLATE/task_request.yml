@@ -1,0 +1,58 @@
+name: Task or Dataset Request
+description: Request a new task or dataset for agent evaluation
+title: "[Task]: "
+labels: ["task-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Suggest a new task or dataset for the Rollout evaluation framework.
+
+  - type: input
+    id: name
+    attributes:
+      label: Task/Dataset Name
+      description: A descriptive name for the task or dataset.
+      placeholder: my-evaluation-task
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What does this task evaluate? What skills or capabilities does it test?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Estimated Difficulty
+      options:
+        - Easy
+        - Medium
+        - Hard
+        - Expert
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Environment Requirements
+      description: What base image, tools, or dependencies are needed?
+      placeholder: |
+        - Base image: python:3.11
+        - Tools: pytest, git
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification Approach
+      description: How should task completion be verified?
+      placeholder: Run pytest, check file contents, etc.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any examples, references, or related tasks.
