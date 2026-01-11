@@ -40,6 +40,17 @@ The `dataset.Loader` has a new `LoadFromRegistry()` method.
 
 Cloned repositories are stored in `/tmp/rollout-registry-<timestamp>/` and persist after job completion for debugging. Users should clean up manually if needed.
 
+## Build Scripts
+
+The project uses goyek v2 for build automation. Scripts are in `build/`.
+
+```bash
+go run ./build -h      # List available tasks
+go run ./build vet     # Run go vet
+```
+
+For adding new tasks and detailed usage, see [docs/build.md](docs/build.md).
+
 ## Development
 
 ### Running Tests
