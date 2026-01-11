@@ -23,6 +23,10 @@
 !LICENSE
 !AGENTS.md
 
+# Documentation
+!docs/
+!docs/**
+
 !*/
 
 # Keep repo spec and architecture tracked
