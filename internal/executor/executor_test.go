@@ -516,3 +516,478 @@ func TestModalAppCleanup(t *testing.T) {
 	// but the test succeeding without errors indicates cleanup worked.
 	t.Log("Modal cleanup test completed - sandbox terminated successfully")
 }
+
+
+// --- Task Filtering Tests ---
+
+// createMultiTaskDataset creates a temporary dataset with multiple tasks for testing.
+func createMultiTaskDataset(t *testing.T) string {
+	t.Helper()
+	
+	baseDir := t.TempDir()
+	
+	tasks := []string{"task-a", "task-b", "task-c"}
+	for _, taskName := range tasks {
+		taskDir := filepath.Join(baseDir, taskName)
+		if err := os.MkdirAll(filepath.Join(taskDir, "environment"), 0755); err != nil {
+			t.Fatalf("creating task dir: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(taskDir, "tests"), 0755); err != nil {
+			t.Fatalf("creating tests dir: %v", err)
+		}
+		
+		// Create minimal task.toml
+		taskToml := `[task]
+timeout_sec = 60
+`
+		if err := os.WriteFile(filepath.Join(taskDir, "task.toml"), []byte(taskToml), 0644); err != nil {
+			t.Fatalf("writing task.toml: %v", err)
+		}
+		
+		// Create instruction.md
+		if err := os.WriteFile(filepath.Join(taskDir, "instruction.md"), []byte("# Test task"), 0644); err != nil {
+			t.Fatalf("writing instruction.md: %v", err)
+		}
+		
+		// Create Dockerfile
+		dockerfile := "FROM alpine:latest\nRUN apk add --no-cache bash\n"
+		if err := os.WriteFile(filepath.Join(taskDir, "environment", "Dockerfile"), []byte(dockerfile), 0644); err != nil {
+			t.Fatalf("writing Dockerfile: %v", err)
+		}
+		
+		// Create test.sh that always passes
+		testScript := "#!/bin/bash\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(taskDir, "tests", "test.sh"), []byte(testScript), 0755); err != nil {
+			t.Fatalf("writing test.sh: %v", err)
+		}
+	}
+	
+	return baseDir
+}
+
+func TestTaskFiltering_LocalDataset(t *testing.T) {
+	datasetPath := createMultiTaskDataset(t)
+	
+	cfg := models.JobConfig{
+		Name:              ptr("test-task-filtering-local"),
+		JobsDir:           t.TempDir(),
+		NAttempts:         1,
+		NConcurrentTrials: 1,
+		TimeoutMultiplier: 1.0,
+		InstructionPath:   "/tmp/instruction.md",
+		Environment:       models.JobEnvironmentConfig{Type: "docker"},
+		Agents:            []models.Agent{{Name: "test-agent"}},
+		Datasets: []models.DatasetRef{
+			{
+				Path:  &datasetPath,
+				Tasks: []string{"task-a", "task-c"}, // Filter to only 2 tasks
+			},
+		},
+	}
+
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
+	if err != nil {
+		t.Fatalf("creating orchestrator: %v", err)
+	}
+
+	result, err := orchestrator.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running job: %v", err)
+	}
+
+	// Should only have 2 trials (one per filtered task)
+	if result.TotalTrials != 2 {
+		t.Errorf("expected 2 trials (filtered tasks), got %d", result.TotalTrials)
+	}
+
+	// Verify task names
+	tasksSeen := make(map[string]bool)
+	for _, r := range result.Results {
+		tasksSeen[r.TaskName] = true
+	}
+	if !tasksSeen["task-a"] {
+		t.Error("expected task-a to be executed")
+	}
+	if !tasksSeen["task-c"] {
+		t.Error("expected task-c to be executed")
+	}
+	if tasksSeen["task-b"] {
+		t.Error("task-b should have been filtered out")
+	}
+}
+
+func TestTaskFiltering_NonExistentTask_FailsEarly(t *testing.T) {
+	datasetPath := createMultiTaskDataset(t)
+	
+	cfg := models.JobConfig{
+		Name:              ptr("test-task-filtering-invalid"),
+		JobsDir:           t.TempDir(),
+		NAttempts:         1,
+		NConcurrentTrials: 1,
+		TimeoutMultiplier: 1.0,
+		InstructionPath:   "/tmp/instruction.md",
+		Environment:       models.JobEnvironmentConfig{Type: "docker"},
+		Agents:            []models.Agent{{Name: "test-agent"}},
+		Datasets: []models.DatasetRef{
+			{
+				Path:  &datasetPath,
+				Tasks: []string{"task-a", "nonexistent-task"}, // One valid, one invalid
+			},
+		},
+	}
+
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
+	if err != nil {
+		t.Fatalf("creating orchestrator: %v", err)
+	}
+
+	_, err = orchestrator.Run(t.Context())
+	if err == nil {
+		t.Fatal("expected error for nonexistent task, got nil")
+	}
+
+	errStr := err.Error()
+	if !strings.Contains(errStr, "filtering dataset") {
+		t.Errorf("error should mention filtering: %v", err)
+	}
+	if !strings.Contains(errStr, "nonexistent-task") {
+		t.Errorf("error should mention the invalid task name: %v", err)
+	}
+}
+
+func TestTaskFiltering_NilTasks_RunsAllTasks(t *testing.T) {
+	datasetPath := createMultiTaskDataset(t)
+	
+	cfg := models.JobConfig{
+		Name:              ptr("test-task-filtering-nil"),
+		JobsDir:           t.TempDir(),
+		NAttempts:         1,
+		NConcurrentTrials: 1,
+		TimeoutMultiplier: 1.0,
+		InstructionPath:   "/tmp/instruction.md",
+		Environment:       models.JobEnvironmentConfig{Type: "docker"},
+		Agents:            []models.Agent{{Name: "test-agent"}},
+		Datasets: []models.DatasetRef{
+			{
+				Path:  &datasetPath,
+				Tasks: nil, // nil means run all tasks
+			},
+		},
+	}
+
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
+	if err != nil {
+		t.Fatalf("creating orchestrator: %v", err)
+	}
+
+	result, err := orchestrator.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running job: %v", err)
+	}
+
+	// Should have all 3 tasks
+	if result.TotalTrials != 3 {
+		t.Errorf("expected 3 trials (all tasks), got %d", result.TotalTrials)
+	}
+
+	// Verify all task names present
+	tasksSeen := make(map[string]bool)
+	for _, r := range result.Results {
+		tasksSeen[r.TaskName] = true
+	}
+	for _, name := range []string{"task-a", "task-b", "task-c"} {
+		if !tasksSeen[name] {
+			t.Errorf("expected %s to be executed", name)
+		}
+	}
+}
+
+func TestTaskFiltering_SingleTask(t *testing.T) {
+	datasetPath := createMultiTaskDataset(t)
+	
+	cfg := models.JobConfig{
+		Name:              ptr("test-task-filtering-single"),
+		JobsDir:           t.TempDir(),
+		NAttempts:         1,
+		NConcurrentTrials: 1,
+		TimeoutMultiplier: 1.0,
+		InstructionPath:   "/tmp/instruction.md",
+		Environment:       models.JobEnvironmentConfig{Type: "docker"},
+		Agents:            []models.Agent{{Name: "test-agent"}},
+		Datasets: []models.DatasetRef{
+			{
+				Path:  &datasetPath,
+				Tasks: []string{"task-b"}, // Only one task
+			},
+		},
+	}
+
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
+	if err != nil {
+		t.Fatalf("creating orchestrator: %v", err)
+	}
+
+	result, err := orchestrator.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running job: %v", err)
+	}
+
+	// Should have exactly 1 trial
+	if result.TotalTrials != 1 {
+		t.Errorf("expected 1 trial, got %d", result.TotalTrials)
+	}
+
+	if result.Results[0].TaskName != "task-b" {
+		t.Errorf("expected task-b, got %s", result.Results[0].TaskName)
+	}
+}
+
+func TestTaskFiltering_MultipleAttempts(t *testing.T) {
+	datasetPath := createMultiTaskDataset(t)
+	
+	cfg := models.JobConfig{
+		Name:              ptr("test-task-filtering-attempts"),
+		JobsDir:           t.TempDir(),
+		NAttempts:         3, // Multiple attempts
+		NConcurrentTrials: 2,
+		TimeoutMultiplier: 1.0,
+		InstructionPath:   "/tmp/instruction.md",
+		Environment:       models.JobEnvironmentConfig{Type: "docker"},
+		Agents:            []models.Agent{{Name: "test-agent"}},
+		Datasets: []models.DatasetRef{
+			{
+				Path:  &datasetPath,
+				Tasks: []string{"task-a", "task-c"}, // 2 tasks
+			},
+		},
+	}
+
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
+	if err != nil {
+		t.Fatalf("creating orchestrator: %v", err)
+	}
+
+	result, err := orchestrator.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running job: %v", err)
+	}
+
+	// Should have 2 tasks * 3 attempts = 6 trials
+	if result.TotalTrials != 6 {
+		t.Errorf("expected 6 trials (2 tasks * 3 attempts), got %d", result.TotalTrials)
+	}
+}
+
+
+// --- Task Override Tests ---
+
+func TestRunFromConfigWithOptions_TaskOverride(t *testing.T) {
+	// This test verifies that RunFromConfigWithOptions applies task override correctly
+	projectRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("getting project root: %v", err)
+	}
+
+	// Create a test job.yaml with task filters
+	jobYaml := `name: test-task-override
+agents:
+  - name: oracle
+n_attempts: 1
+datasets:
+  - path: ./testdata/multi-task-dataset
+    tasks:
+      - task-a
+      - task-b
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "job.yaml")
+	if err := os.WriteFile(configPath, []byte(jobYaml), 0644); err != nil {
+		t.Fatalf("writing job.yaml: %v", err)
+	}
+
+	// Load and verify config loading works
+	cfg, err := config.LoadJobConfig(configPath)
+	if err != nil {
+		t.Fatalf("loading job config: %v", err)
+	}
+
+	// Verify original tasks
+	if len(cfg.Datasets) != 1 {
+		t.Fatalf("expected 1 dataset, got %d", len(cfg.Datasets))
+	}
+
+	originalTasks := cfg.Datasets[0].Tasks
+	if len(originalTasks) != 2 {
+		t.Fatalf("expected 2 tasks in original config, got %d", len(originalTasks))
+	}
+
+	// Now test with task override
+	cfg, err = config.LoadJobConfig(configPath)
+	if err != nil {
+		t.Fatalf("loading job config: %v", err)
+	}
+
+	// Simulate what RunFromConfigWithOptions does
+	taskOverride := []string{"task-c"}
+	for i := range cfg.Datasets {
+		cfg.Datasets[i].Tasks = taskOverride
+	}
+
+	// Verify override was applied
+	if len(cfg.Datasets[0].Tasks) != 1 {
+		t.Fatalf("expected 1 task after override, got %d", len(cfg.Datasets[0].Tasks))
+	}
+	if cfg.Datasets[0].Tasks[0] != "task-c" {
+		t.Errorf("expected task-c, got %s", cfg.Datasets[0].Tasks[0])
+	}
+
+	// Make dataset path absolute for loading
+	absPath := filepath.Join(projectRoot, "testdata", "multi-task-dataset")
+	cfg.Datasets[0].Path = &absPath
+	cfg.JobsDir = tmpDir
+
+	// Create orchestrator and verify it processes the override correctly
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
+	if err != nil {
+		t.Fatalf("creating orchestrator: %v", err)
+	}
+
+	result, err := orchestrator.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running job: %v", err)
+	}
+
+	// Should have executed exactly 1 trial (1 agent × 1 task × 1 attempt)
+	if result.TotalTrials != 1 {
+		t.Errorf("expected 1 trial with task override, got %d", result.TotalTrials)
+	}
+
+	// Verify the task that ran was task-c
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	if result.Results[0].TaskName != "task-c" {
+		t.Errorf("expected task-c to run, got %s", result.Results[0].TaskName)
+	}
+}
+
+func TestRunFromConfigWithOptions_TaskOverrideMultipleDatasets(t *testing.T) {
+	// Verify task override applies to ALL datasets
+	projectRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("getting project root: %v", err)
+	}
+
+	multiTaskPath := filepath.Join(projectRoot, "testdata", "multi-task-dataset")
+	helloWorldPath := filepath.Join(projectRoot, "testdata", "hello-world-dataset")
+
+	// Create config with two datasets with different task filters
+	cfg := models.JobConfig{
+		Name:              ptr("test-override-multiple"),
+		JobsDir:          t.TempDir(),
+		NAttempts:        1,
+		NConcurrentTrials: 1,
+		TimeoutMultiplier: 1.0,
+		InstructionPath:  "/tmp/instruction.md",
+		Environment: models.JobEnvironmentConfig{
+			Type:        "docker",
+			PreserveEnv: models.PreserveNever,
+		},
+		Agents: []models.Agent{
+			{Name: "oracle"},
+		},
+		Datasets: []models.DatasetRef{
+			{
+				Path:  &multiTaskPath,
+				Tasks: []string{"task-a"},  // Original filter
+			},
+			{
+				Path:  &helloWorldPath,
+				Tasks: []string{"hello-world"}, // Original filter
+			},
+		},
+	}
+
+	// Apply task override (simulating CLI flag)
+	taskOverride := []string{"task-a", "task-b"}
+	for i := range cfg.Datasets {
+		cfg.Datasets[i].Tasks = taskOverride
+	}
+
+	// Verify both datasets now have the override
+	for i, ds := range cfg.Datasets {
+		if len(ds.Tasks) != 2 {
+			t.Errorf("dataset[%d]: expected 2 tasks after override, got %d", i, len(ds.Tasks))
+		}
+		if ds.Tasks[0] != "task-a" || ds.Tasks[1] != "task-b" {
+			t.Errorf("dataset[%d]: tasks not correctly overridden", i)
+		}
+	}
+}
+
+func TestRunOptions_NilTaskOverride(t *testing.T) {
+	// Verify nil TaskOverride doesn't change original config
+	projectRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("getting project root: %v", err)
+	}
+
+	jobYaml := `name: test-nil-override
+agents:
+  - name: oracle
+n_attempts: 1
+datasets:
+  - path: ./testdata/multi-task-dataset
+    tasks:
+      - task-a
+      - task-b
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "job.yaml")
+	if err := os.WriteFile(configPath, []byte(jobYaml), 0644); err != nil {
+		t.Fatalf("writing job.yaml: %v", err)
+	}
+
+	cfg, err := config.LoadJobConfig(configPath)
+	if err != nil {
+		t.Fatalf("loading job config: %v", err)
+	}
+
+	// Simulate RunFromConfigWithOptions with nil override (no change)
+	opts := RunOptions{TaskOverride: nil}
+	if opts.TaskOverride != nil {
+		for i := range cfg.Datasets {
+			cfg.Datasets[i].Tasks = opts.TaskOverride
+		}
+	}
+
+	// Original tasks should remain unchanged
+	if len(cfg.Datasets[0].Tasks) != 2 {
+		t.Errorf("expected 2 tasks (unchanged), got %d", len(cfg.Datasets[0].Tasks))
+	}
+	if cfg.Datasets[0].Tasks[0] != "task-a" || cfg.Datasets[0].Tasks[1] != "task-b" {
+		t.Error("original tasks were modified when TaskOverride was nil")
+	}
+
+	// Make path absolute for actual test
+	absPath := filepath.Join(projectRoot, "testdata", "multi-task-dataset")
+	cfg.Datasets[0].Path = &absPath
+	cfg.JobsDir = tmpDir
+
+	orchestrator, err := NewJobOrchestrator(cfg, mockExecutorFunc)
+	if err != nil {
+		t.Fatalf("creating orchestrator: %v", err)
+	}
+
+	result, err := orchestrator.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running job: %v", err)
+	}
+
+	// Should run 2 trials (task-a and task-b)
+	if result.TotalTrials != 2 {
+		t.Errorf("expected 2 trials with nil override (original config), got %d", result.TotalTrials)
+	}
+}

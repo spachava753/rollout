@@ -2,22 +2,50 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"github.com/spachava753/rollout/internal/config"
 	"github.com/spachava753/rollout/internal/executor"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: rollout <job.yaml>")
+	// Define flags
+	tasksFlag := flag.String("tasks", "", "Override task selection (comma-separated task names)")
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: rollout [options] <job.yaml>")
+		fmt.Fprintln(os.Stderr, "\nOptions:")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	// Validate positional argument
+	if flag.NArg() < 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	configPath := os.Args[1]
+	configPath := flag.Arg(0)
+
+	// Parse and validate --tasks flag
+	var taskOverride []string
+	if *tasksFlag != "" {
+		taskOverride = strings.Split(*tasksFlag, ",")
+		// Trim whitespace from each task name
+		for i := range taskOverride {
+			taskOverride[i] = strings.TrimSpace(taskOverride[i])
+		}
+		// Validate task names
+		if err := config.ValidateTaskNames(taskOverride); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
 	// Setup context with manual signal handling
 	ctx, cancel := context.WithCancel(context.Background())
@@ -37,7 +65,11 @@ func main() {
 		cancel()
 	}()
 
-	result, err := executor.RunFromConfig(ctx, configPath)
+	opts := executor.RunOptions{
+		TaskOverride: taskOverride,
+	}
+
+	result, err := executor.RunFromConfigWithOptions(ctx, configPath, opts)
 	if err != nil {
 		slog.Error("job failed", "error", err)
 		os.Exit(1)

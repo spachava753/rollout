@@ -61,6 +61,7 @@ type DatasetRef struct {
 	Registry *RegistryRef `yaml:"registry,omitempty" json:"registry,omitempty"`
 	Name     string       `yaml:"name,omitempty" json:"name,omitempty"`
 	Version  string       `yaml:"version,omitempty" json:"version,omitempty"`
+	Tasks    []string     `yaml:"tasks,omitempty" json:"tasks,omitempty"`
 }
 
 type RegistryRef struct {
