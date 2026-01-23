@@ -1,0 +1,20 @@
+# Job config demonstrating task filtering (issue #7)
+# Only runs task-a and task-b from multi-task-dataset, skipping task-c
+name: test-task-filter
+jobs_dir: jobs
+n_attempts: 1
+n_concurrent_trials: 2
+timeout_multiplier: 1.0
+instruction_path: /tmp/instruction.md
+environment:
+  type: modal
+  preserve_env: never
+  provider_config:
+    timeout_secs: 600
+agents:
+  - name: oracle
+datasets:
+  - path: ./testdata/multi-task-dataset
+    tasks:
+      - task-a
+      - task-b

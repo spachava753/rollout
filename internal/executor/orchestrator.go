@@ -70,23 +70,38 @@ func (o *JobOrchestrator) Run(ctx context.Context) (*models.JobResult, error) {
 	var datasets []models.Dataset
 
 	for _, ref := range o.cfg.Datasets {
+		var ds *models.Dataset
+		var err error
+
 		if ref.Path != nil {
 			slog.Debug("loading dataset from path", "path", *ref.Path)
-			ds, err := loader.LoadFromPath(ctx, *ref.Path)
+			ds, err = loader.LoadFromPath(ctx, *ref.Path)
 			if err != nil {
 				return nil, fmt.Errorf("loading dataset from path %s: %w", *ref.Path, err)
 			}
 			slog.Info("loaded dataset", "name", ds.Name, "tasks", len(ds.Tasks))
-			datasets = append(datasets, *ds)
 		} else if ref.Registry != nil {
 			slog.Debug("loading dataset from registry", "name", ref.Name, "version", ref.Version)
-			ds, err := loader.LoadFromRegistry(ctx, *ref.Registry, ref.Name, ref.Version)
+			ds, err = loader.LoadFromRegistry(ctx, *ref.Registry, ref.Name, ref.Version)
 			if err != nil {
 				return nil, fmt.Errorf("loading dataset %s from registry: %w", ref.Name, err)
 			}
 			slog.Info("loaded dataset", "name", ds.Name, "version", ds.Version, "tasks", len(ds.Tasks))
-			datasets = append(datasets, *ds)
+		} else {
+			continue
 		}
+
+		// Apply task filter if specified
+		if ref.Tasks != nil {
+			dsName := ds.Name // Save name before filter (filter may return nil on error)
+			ds, err = dataset.FilterTasks(ds, ref.Tasks)
+			if err != nil {
+				return nil, fmt.Errorf("filtering dataset %s: %w", dsName, err)
+			}
+			slog.Info("filtered dataset", "name", ds.Name, "tasks", len(ds.Tasks), "filter", ref.Tasks)
+		}
+
+		datasets = append(datasets, *ds)
 	}
 
 	// Generate trials (Cartesian product of agents × tasks × attempts)
@@ -232,7 +247,6 @@ func (o *JobOrchestrator) runConcurrent(ctx context.Context, trials []models.Tri
 	}
 
 	// Feeder goroutine: sends trials to workers, respects context cancellation
-	fed := 0
 	go func() {
 		defer close(trialChan)
 		for _, trial := range trials {
@@ -241,7 +255,6 @@ func (o *JobOrchestrator) runConcurrent(ctx context.Context, trials []models.Tri
 				slog.Debug("stopping trial feeder due to context cancellation")
 				return
 			case trialChan <- trial:
-				fed++
 			}
 		}
 	}()
@@ -366,12 +379,32 @@ func DefaultTrialExecutorFunc(cfg models.JobConfig) TrialExecutor {
 	return NewTrialExecutor(cfg.InstructionPath, cfg.TimeoutMultiplier, cfg.Verifier, cfg.Environment)
 }
 
+// RunOptions configures optional parameters for job execution.
+type RunOptions struct {
+	// TaskOverride replaces task filters for all datasets when set.
+	// If non-nil, this overrides any tasks specified in job.yaml.
+	TaskOverride []string
+}
+
 // RunFromConfig loads a job config file and executes the job.
 func RunFromConfig(ctx context.Context, configPath string) (*models.JobResult, error) {
+	return RunFromConfigWithOptions(ctx, configPath, RunOptions{})
+}
+
+// RunFromConfigWithOptions loads a job config file and executes the job with options.
+func RunFromConfigWithOptions(ctx context.Context, configPath string, opts RunOptions) (*models.JobResult, error) {
 	slog.Info("loading job config", "path", configPath)
 	cfg, err := config.LoadJobConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading job config: %w", err)
+	}
+
+	// Apply task override to all datasets if specified
+	if opts.TaskOverride != nil {
+		slog.Info("applying CLI task override to all datasets", "tasks", opts.TaskOverride)
+		for i := range cfg.Datasets {
+			cfg.Datasets[i].Tasks = opts.TaskOverride
+		}
 	}
 
 	// Configure logging based on job config

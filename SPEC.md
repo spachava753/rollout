@@ -611,14 +611,58 @@ agents:
   - name: oracle
 datasets:
   - path: ./path-to-dataset # path to a local dataset, a folder that contains tasks
+    tasks: # optional: filter to run only specific tasks (omit to run all tasks)
+      - task-name-1
+      - task-name-2
   - registry:
       path: ./path-to-registry # path to a registry defining datasets
     name: "dataset-name" # name of dataset as found in registry
     version: "dataset-version" # version of dataset as found in registry
+    tasks: # optional: filter to run only specific tasks
+      - specific-task-a
+      - specific-task-b
   - registry:
       url: https://raw.githubusercontent.com/laude-institute/harbor/refs/heads/main/registry.json # url to a registry defining datasets
     name: "dataset-name" # name of dataset as found in registry
     version: "dataset-version" # version of dataset as found in registry
+    # tasks field omitted = run all tasks (backward compatible)
+```
+
+**Task filtering:** The `tasks` field allows you to selectively run specific tasks from a dataset instead of executing all tasks. This is useful for debugging specific tasks, running subsets for faster iteration, or focusing on particular areas of a benchmark.
+
+Task filter behavior:
+- When `tasks` is omitted (nil), all tasks in the dataset are executed (backward compatible).
+- When `tasks` is specified, only the listed tasks are executed.
+- Task names are **case-sensitive** (they match directory names on the filesystem).
+- Task names must match the pattern `^[a-zA-Z0-9][a-zA-Z0-9_-]*$` (start with alphanumeric, contain only alphanumeric characters, underscores, and hyphens).
+- Duplicate task names in the filter are silently deduplicated (first occurrence preserved).
+- If any specified task does not exist in the dataset, the job fails with an error listing the missing tasks.
+- Filtered tasks are executed in the order specified in the `tasks` array.
+
+Example task filtering configurations:
+
+```yaml
+# Run only two specific tasks from a local dataset
+datasets:
+  - path: ./my-benchmark
+    tasks:
+      - hello-world
+      - complex-task
+
+# Run specific tasks from a registry dataset
+datasets:
+  - registry:
+      url: https://example.com/registry.json
+    name: "terminal-bench"
+    version: "2.0"
+    tasks:
+      - adaptive-rejection-sampler
+      - write-compressor
+
+# Run all tasks (default behavior when tasks is omitted)
+datasets:
+  - path: ./my-benchmark
+  # tasks field omitted = run all tasks
 ```
 
 **Retry policy:** The `retry` configuration enables automatic retries for transient infrastructure failures such as HTTP 500 errors from cloud sandbox providers, network timeouts during image pulls, or temporary resource allocation failures. Retries use exponential backoff: the delay between attempts starts at `initial_delay_ms` and multiplies by `multiplier` after each attempt, capped at `max_delay_ms`. Only infrastructure-level failures are retried; agent execution failures and verifier failures are not retried as they represent legitimate task outcomes.
@@ -822,5 +866,4 @@ The following features are currently out of scope but may be considered for futu
 - **Job resumption:** Resuming stopped or cancelled jobs from where they left off. Currently, cancelled jobs must be restarted from scratch.
 - **Advanced caching strategies:** Baking images with agent installations pre-applied to reduce trial startup time. Currently, agent installation runs fresh for each trial.
 - **Network isolation:** Restricting agent network access during task execution. Currently, agents have full network access, which may be necessary for accessing documentation or downloading dependencies. Users should verify agents have not used unauthorized resources by reviewing agent logs.
-- **Task filtering:** Selecting or filtering specific tasks from datasets in job configuration. Currently, all tasks in a dataset are included.
 - **Anonymous datasets:** Executing a specified list of task paths directly without defining a dataset. Currently, tasks must be organized into a dataset structure.

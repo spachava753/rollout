@@ -219,6 +219,7 @@ type DatasetRef struct {
 	Registry *RegistryRef `yaml:"registry,omitempty" json:"registry,omitempty"`
 	Name     string       `yaml:"name,omitempty" json:"name,omitempty"`
 	Version  string       `yaml:"version,omitempty" json:"version,omitempty"`
+	Tasks    []string     `yaml:"tasks,omitempty" json:"tasks,omitempty"` // optional: filter to specific task names
 }
 
 type RegistryRef struct {
@@ -485,6 +486,21 @@ type DatasetLoader interface {
 }
 ```
 
+### Task Filter
+
+```go
+// FilterTasks filters a dataset's tasks based on the provided task names.
+// Returns a NEW Dataset with only the specified tasks; does not modify the original.
+// If taskNames is nil, returns the dataset unchanged.
+// If taskNames is empty slice, returns error ("tasks cannot be empty when specified").
+// Returns error if any specified task is not found in the dataset.
+// Matching is case-sensitive (task names come from directory names).
+// Duplicate task names in the filter are silently deduplicated (first occurrence preserved).
+func FilterTasks(ds *Dataset, taskNames []string) (*Dataset, error)
+```
+
+The `FilterTasks` function is called by the orchestrator after loading each dataset when the `DatasetRef.Tasks` field is specified. This keeps the loader focused on loading while providing flexible post-load filtering that works uniformly for both local and registry datasets.
+
 ### Registry Client
 
 ```go
@@ -675,6 +691,7 @@ rollout/
 │   │   └── task.go           # TaskConfig parsing and validation
 │   ├── dataset/
 │   │   ├── loader.go         # DatasetLoader implementation
+│   │   ├── filter.go         # FilterTasks function for task filtering
 │   │   └── registry.go       # RegistryClient implementation
 │   ├── environment/
 │   │   ├── provider.go       # EnvironmentProvider interface

@@ -1,0 +1,1 @@
+Create a file called task-c.txt with the content "Task C completed".

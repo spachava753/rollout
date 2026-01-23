@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -203,5 +204,279 @@ func TestDefaultJobConfig(t *testing.T) {
 
 	if cfg.Environment.PreserveEnv != models.PreserveNever {
 		t.Errorf("expected default preserve_env never, got %s", cfg.Environment.PreserveEnv)
+	}
+}
+
+
+func TestLoadJobConfig_TaskFilterValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		tasksYaml   string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:      "nil tasks accepted",
+			tasksYaml: "", // no tasks field
+			wantErr:   false,
+		},
+		{
+			name:        "empty tasks array rejected",
+			tasksYaml:   "    tasks: []",
+			wantErr:     true,
+			errContains: "tasks cannot be empty when specified",
+		},
+		{
+			name:      "valid task names accepted",
+			tasksYaml: "    tasks: [task-1, task_2, Task3, a1]",
+			wantErr:   false,
+		},
+		{
+			name:      "single character task name accepted",
+			tasksYaml: "    tasks: [a]",
+			wantErr:   false,
+		},
+		{
+			name:        "empty string rejected",
+			tasksYaml:   "    tasks: [\"\"]",
+			wantErr:     true,
+			errContains: "invalid task name \"\"",
+		},
+		{
+			name:        "forward slash rejected",
+			tasksYaml:   "    tasks: [foo/bar]",
+			wantErr:     true,
+			errContains: "invalid task name \"foo/bar\"",
+		},
+		{
+			name:        "backslash rejected",
+			tasksYaml:   "    tasks: [\"foo\\bar\"]",
+			wantErr:     true,
+			errContains: "invalid task name",
+		},
+		{
+			name:        "whitespace-only rejected",
+			tasksYaml:   "    tasks: [\"   \"]",
+			wantErr:     true,
+			errContains: "invalid task name",
+		},
+		{
+			name:        "starts with hyphen rejected",
+			tasksYaml:   "    tasks: [-task]",
+			wantErr:     true,
+			errContains: "invalid task name \"-task\"",
+		},
+		{
+			name:        "starts with underscore rejected",
+			tasksYaml:   "    tasks: [_task]",
+			wantErr:     true,
+			errContains: "invalid task name \"_task\"",
+		},
+		{
+			name:        "contains space rejected",
+			tasksYaml:   "    tasks: [\"task name\"]",
+			wantErr:     true,
+			errContains: "invalid task name",
+		},
+		{
+			name:        "contains dot rejected",
+			tasksYaml:   "    tasks: [task.name]",
+			wantErr:     true,
+			errContains: "invalid task name",
+		},
+		{
+			name:      "duplicates generate warning but no error",
+			tasksYaml: "    tasks: [task1, task2, task1]",
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build the YAML with optional tasks field
+			var yamlContent string
+			if tt.tasksYaml == "" {
+				yamlContent = `name: test
+agents:
+  - name: oracle
+datasets:
+  - path: ./test-dataset
+`
+			} else {
+				yamlContent = `name: test
+agents:
+  - name: oracle
+datasets:
+  - path: ./test-dataset
+` + tt.tasksYaml + "\n"
+			}
+
+			tmpDir := t.TempDir()
+			tmpFile := filepath.Join(tmpDir, "job.yaml")
+			if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+				t.Fatalf("writing temp file: %v", err)
+			}
+
+			_, err := config.LoadJobConfig(tmpFile)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadJobConfig_TaskFilterMultipleDatasets(t *testing.T) {
+	// Test that validation works correctly when multiple datasets have task filters
+	yamlContent := `name: test
+agents:
+  - name: oracle
+datasets:
+  - path: ./dataset1
+    tasks: [valid-task]
+  - path: ./dataset2
+    tasks: [foo/bar]
+`
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "job.yaml")
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("writing temp file: %v", err)
+	}
+
+	_, err := config.LoadJobConfig(tmpFile)
+	if err == nil {
+		t.Error("expected error for invalid task name in second dataset")
+		return
+	}
+
+	// Check error refers to dataset[1]
+	if !strings.Contains(err.Error(), "dataset[1]") {
+		t.Errorf("error should reference dataset[1], got: %v", err)
+	}
+}
+
+func TestLoadJobConfig_ValidTasksAccepted(t *testing.T) {
+	// Test that config with valid task names loads successfully and tasks are preserved
+	yamlContent := `name: test
+agents:
+  - name: oracle
+datasets:
+  - path: ./test-dataset
+    tasks:
+      - task-one
+      - task_two
+      - Task3
+`
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "job.yaml")
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("writing temp file: %v", err)
+	}
+
+	cfg, err := config.LoadJobConfig(tmpFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.Datasets) != 1 {
+		t.Fatalf("expected 1 dataset, got %d", len(cfg.Datasets))
+	}
+
+	tasks := cfg.Datasets[0].Tasks
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(tasks))
+	}
+
+	expected := []string{"task-one", "task_two", "Task3"}
+	for i, want := range expected {
+		if tasks[i] != want {
+			t.Errorf("tasks[%d] = %q, want %q", i, tasks[i], want)
+		}
+	}
+}
+
+
+func TestValidateTaskNames(t *testing.T) {
+	tests := []struct {
+		name        string
+		tasks       []string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "nil tasks accepted",
+			tasks:   nil,
+			wantErr: false,
+		},
+		{
+			name:        "empty tasks rejected",
+			tasks:       []string{},
+			wantErr:     true,
+			errContains: "--tasks cannot be empty when specified",
+		},
+		{
+			name:    "valid task names accepted",
+			tasks:   []string{"task-1", "task_2", "Task3"},
+			wantErr: false,
+		},
+		{
+			name:    "single task accepted",
+			tasks:   []string{"task1"},
+			wantErr: false,
+		},
+		{
+			name:        "empty string in list rejected",
+			tasks:       []string{"task1", ""},
+			wantErr:     true,
+			errContains: "invalid task name \"\"",
+		},
+		{
+			name:        "invalid characters rejected",
+			tasks:       []string{"foo/bar"},
+			wantErr:     true,
+			errContains: "invalid task name \"foo/bar\"",
+		},
+		{
+			name:        "task starting with hyphen rejected",
+			tasks:       []string{"-task"},
+			wantErr:     true,
+			errContains: "invalid task name \"-task\"",
+		},
+		{
+			name:        "task with space rejected",
+			tasks:       []string{"task name"},
+			wantErr:     true,
+			errContains: "invalid task name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := config.ValidateTaskNames(tt.tasks)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
 	}
 }
