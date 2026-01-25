@@ -1,0 +1,56 @@
+# golangci-lint configuration
+# Focus: catching real bugs, not enforcing style preferences
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # Start with default linters (errcheck, govet, ineffassign, staticcheck, unused)
+  # and add more bug-detection focused linters
+  enable:
+    # Bug Detection (in addition to defaults)
+    - nilerr         # catches returning nil when error is not nil
+
+    # Resource Leaks
+    - bodyclose      # HTTP response body closure
+    - sqlclosecheck  # SQL rows/stmt closure
+
+    # Security
+    - gosec          # security-focused checks
+
+    # Other High-Value
+    - durationcheck  # catches duration arithmetic bugs
+    - gocritic       # selective diagnostic checks
+    - unparam        # unused function parameters
+
+linters-settings:
+  govet:
+    enable-all: true
+  gocritic:
+    # Only enable diagnostic checks, not style rules
+    enabled-tags:
+      - diagnostic
+    disabled-tags:
+      - style
+      - opinionated
+      - experimental
+  gosec:
+    excludes:
+      - G104  # Duplicates errcheck
+  staticcheck:
+    checks:
+      - all
+
+issues:
+  # Don't limit the number of issues reported
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    # Ignore error checks in test files for deferred Close() calls
+    - path: _test\.go
+      linters:
+        - errcheck
+      text: "Error return value of .*(Close|Cleanup)"

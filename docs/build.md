@@ -22,6 +22,7 @@ go run ./build task1 task2
 | Task | Description |
 |------|-------------|
 | vet  | Run go vet on all packages |
+| lint | Run golangci-lint on all packages |
 
 ## Adding New Tasks
 
